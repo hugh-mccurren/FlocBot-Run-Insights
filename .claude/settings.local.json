@@ -3,7 +3,8 @@
     "allow": [
       "Bash(pip install:*)",
       "Bash(.venv/Scripts/python:*)",
-      "Bash(git checkout -- .streamlit/config.toml run_insights.py)"
+      "Bash(git checkout -- .streamlit/config.toml run_insights.py)",
+      "Bash(git checkout:*)"
     ]
   }
 }

@@ -127,12 +127,19 @@ PHASE_LABELS = {
     "settling": "Settling",
 }
 
-CHART_HEIGHT = 420
+CHART_HEIGHT = 520
 CHART_LAYOUT = dict(
     template="plotly_white",
     height=CHART_HEIGHT,
-    margin=dict(t=96, b=48, l=56, r=24),
-    legend=dict(orientation="h", yanchor="bottom", y=1.10, xanchor="center", x=0.5),
+    margin=dict(t=110, b=48, l=56, r=24),
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.06,
+        xanchor="center",
+        x=0.5,
+        font=dict(size=11),
+    ),
     font=dict(family="Inter, system-ui, sans-serif", size=12),
 )
 
@@ -266,13 +273,13 @@ def add_phase_shading(fig, phases: list[Phase], row=None, col=None):
         )
         fig.add_annotation(
             x=(p.start_min + p.end_min) / 2,
-            y=1.02,
+            y=1.01,
             yref="paper",
             xanchor="center",
             yanchor="bottom",
             text=PHASE_LABELS.get(p.name, p.name),
             showarrow=False,
-            font=dict(size=11, color="gray"),
+            font=dict(size=10, color="gray"),
         )
 
 
@@ -300,15 +307,19 @@ def plot_diameter(df, phases, kpi, meta_label, thresholds_to_show):
     # Settling start marker
     se = phase_by_name(phases, "settling")
     if se:
-        fig.add_vline(x=se.start_min, line_dash="dash", line_color="blue",
-                      annotation_text="Settle start", annotation_position="top right")
+        fig.add_vline(x=se.start_min, line_dash="dash", line_color="blue")
+        fig.add_annotation(
+            x=se.start_min, y=1, yref="paper",
+            xanchor="right", yanchor="top",
+            text="Settle start", showarrow=False,
+            xshift=-6,
+            font=dict(size=11, color="blue"),
+        )
 
-    chart_overrides = dict(CHART_LAYOUT)
-    chart_overrides["margin"] = dict(t=120, b=48, l=56, r=24)
     fig.update_layout(
         title=dict(text="Mean Floc Diameter vs Time", y=0.97, yanchor="top", x=0.5, xanchor="center"),
         xaxis_title="Time (min)", yaxis_title="Mean Diameter (μm)",
-        **chart_overrides,
+        **CHART_LAYOUT,
     )
     return fig
 
@@ -341,12 +352,10 @@ def plot_vol_conc(df, phases, kpi, meta_label):
                 name=f"t10 = {kpi.t10_min:.1f} min",
             ))
 
-    chart_overrides = dict(CHART_LAYOUT)
-    chart_overrides["margin"] = dict(t=120, b=48, l=56, r=24)
     fig.update_layout(
         title=dict(text="Vol. Concentration vs Time", y=0.97, yanchor="top", x=0.5, xanchor="center"),
         xaxis_title="Time (min)", yaxis_title="Vol. Concentration (mm³/L)",
-        **chart_overrides,
+        **CHART_LAYOUT,
     )
     return fig
 
@@ -361,12 +370,10 @@ def plot_floc_count(df, phases, meta_label):
         name=meta_label,
     ))
     add_phase_shading(fig, phases)
-    chart_overrides = dict(CHART_LAYOUT)
-    chart_overrides["margin"] = dict(t=120, b=48, l=56, r=24)
     fig.update_layout(
         title=dict(text="Floc Count vs Time", y=0.97, yanchor="top", x=0.5, xanchor="center"),
         xaxis_title="Time (min)", yaxis_title="Floc Count (per mL)",
-        **chart_overrides,
+        **CHART_LAYOUT,
     )
     return fig
 
@@ -506,7 +513,7 @@ with nav_summary:
                 thr_cols = st.columns(len(thresholds))
                 for tc, thr in zip(thr_cols, thresholds):
                     val = kpi.time_to_thresholds_min.get(thr)
-                    tc.metric(f"{int(thr)} \u00b5m", f"{val} min" if val is not None else "Not reached")
+                    tc.metric(f"{int(thr)} μm", f"{val} min" if val is not None else "Not reached")
 
             if kpi.score_reason:
                 st.caption(kpi.score_reason)
