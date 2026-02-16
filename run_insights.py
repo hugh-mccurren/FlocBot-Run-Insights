@@ -5,11 +5,13 @@ Operator-friendly run summaries and comparisons for RoboJar/FlocBot exports.
 
 import io
 import json
+from datetime import datetime
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from fpdf import FPDF
 
 from flocbot_parser import parse_file, RunMetadata
 from flocbot_metrics import (
@@ -435,6 +437,146 @@ def kpi_to_dict(meta, kpi):
     return d
 
 
+def _fig_to_png(fig, width=900, height=400):
+    """Render a Plotly figure to PNG bytes via kaleido."""
+    return fig.to_image(format="png", width=width, height=height, scale=2)
+
+
+def _pdf_safe(text):
+    """Replace Unicode chars unsupported by Helvetica with ASCII equivalents."""
+    return (
+        str(text)
+        .replace("\u03bc", "u")   # μ → u
+        .replace("\u00d8", "O")   # Ø → O
+        .replace("\u00f8", "o")   # ø → o
+        .replace("\u2014", "-")   # — → -
+        .replace("\u2013", "-")   # – → -
+        .replace("\u2026", "...")  # … → ...
+        .encode("latin-1", errors="replace")
+        .decode("latin-1")
+    )
+
+
+def generate_pdf(run, thresholds_to_show):
+    """Build a 1–2 page PDF report for a single run and return bytes."""
+    meta = run["meta"]
+    kpi = run["kpi"]
+    df = run["df"]
+    phases = run["phases"]
+
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.add_page()
+
+    # ── Title block ──
+    pdf.set_font("Helvetica", "B", 20)
+    pdf.set_text_color(37, 99, 235)  # #2563EB
+    pdf.cell(0, 10, "FlocBot Run Report", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_draw_color(37, 99, 235)
+    pdf.set_line_width(0.6)
+    pdf.line(10, pdf.get_y(), 120, pdf.get_y())
+    pdf.ln(4)
+
+    # ── Metadata section ──
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(100, 116, 139)  # #64748B
+    pdf.cell(0, 5, f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
+
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(30, 41, 59)  # #1E293B
+    pdf.cell(0, 6, _pdf_safe(meta.label), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+
+    meta_rows = [
+        ("Filename", meta.filename),
+        ("Timestamp", meta.generated_timestamp or "-"),
+        ("Protocol", meta.protocol_title or "-"),
+        ("Chemistry", meta.run_chemistry or "-"),
+        ("Dosage", meta.run_dosage or "-"),
+    ]
+    pdf.set_font("Helvetica", "", 9)
+    for label, value in meta_rows:
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(32, 5, label, new_x="RIGHT")
+        pdf.set_text_color(30, 41, 59)
+        pdf.cell(0, 5, _pdf_safe(value), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+
+    # ── KPI table ──
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(30, 41, 59)
+    pdf.cell(0, 7, "Key Performance Indicators", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+
+    kpi_rows = [
+        ("Score", f"{kpi.score}/100" if kpi.score is not None else "N/A"),
+        ("Growth Rate", f"{kpi.growth_rate_um_per_min} um/min" if kpi.growth_rate_um_per_min else "N/A"),
+        ("Pre-settle O", f"{kpi.pre_settle_diameter_um} um" if kpi.pre_settle_diameter_um else "N/A"),
+        ("Plateau Mean", f"{kpi.plateau_mean_um} um" if kpi.plateau_mean_um else "N/A"),
+        ("Plateau CV", f"{kpi.plateau_cv}%" if kpi.plateau_cv else "N/A"),
+        ("Settling t50", f"{kpi.t50_min} min" if kpi.t50_min else "N/A"),
+        ("Settling t10", f"{kpi.t10_min} min" if kpi.t10_min else "N/A"),
+        ("Rapid Mix", f"{kpi.rapid_mix_duration_min:.1f} min" if kpi.rapid_mix_duration_min else "N/A"),
+        ("Flocculation", f"{kpi.flocculation_duration_min:.1f} min" if kpi.flocculation_duration_min else "N/A"),
+        ("Settling", f"{kpi.settling_duration_min:.1f} min" if kpi.settling_duration_min else "N/A"),
+    ]
+    # Add threshold times
+    for thr in sorted(thresholds_to_show):
+        val = kpi.time_to_thresholds_min.get(thr)
+        kpi_rows.append((f"t {int(thr)} um", f"{val} min" if val is not None else "Not reached"))
+
+    pdf.set_font("Helvetica", "", 9)
+    col_w = 45
+    val_w = 45
+    fill = False
+    for label, value in kpi_rows:
+        if fill:
+            pdf.set_fill_color(248, 250, 252)  # #F8FAFC
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(col_w, 5.5, _pdf_safe(label), fill=fill, new_x="RIGHT")
+        pdf.set_text_color(30, 41, 59)
+        pdf.cell(val_w, 5.5, _pdf_safe(value), fill=fill, new_x="LMARGIN", new_y="NEXT")
+        fill = not fill
+    pdf.ln(4)
+
+    # ── Charts ──
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(30, 41, 59)
+    pdf.cell(0, 7, "Charts", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+
+    chart_w = 190  # mm, page width minus margins
+
+    # Diameter chart
+    fig_diam = plot_diameter(df, phases, kpi, meta.label, thresholds_to_show)
+    fig_diam.update_layout(height=380, margin=dict(t=80, b=40, l=50, r=20))
+    png_diam = _fig_to_png(fig_diam, width=900, height=380)
+    img_diam = io.BytesIO(png_diam)
+    img_diam.name = "diameter.png"
+    pdf.image(img_diam, x=10, w=chart_w)
+    pdf.ln(3)
+
+    # Vol conc chart (new page if needed)
+    if "vol_conc_mm3_L" in df.columns:
+        if pdf.get_y() > 200:
+            pdf.add_page()
+        fig_vc = plot_vol_conc(df, phases, kpi, meta.label)
+        fig_vc.update_layout(height=380, margin=dict(t=80, b=40, l=50, r=20))
+        png_vc = _fig_to_png(fig_vc, width=900, height=380)
+        img_vc = io.BytesIO(png_vc)
+        img_vc.name = "volconc.png"
+        pdf.image(img_vc, x=10, w=chart_w)
+
+    # Footer
+    pdf.set_y(-15)
+    pdf.set_font("Helvetica", "I", 7)
+    pdf.set_text_color(148, 163, 184)  # #94A3B8
+    pdf.cell(0, 5, "FlocBot Run Insights", align="C")
+
+    return bytes(pdf.output())
+
+
 def _chart_card_open(title, subtitle=""):
     """Emit opening HTML for a chart card wrapper."""
     sub = f'<p class="chart-subtitle">{subtitle}</p>' if subtitle else ""
@@ -454,6 +596,13 @@ st.markdown('<div class="header-accent"></div>', unsafe_allow_html=True)
 
 run_labels = [r["meta"].label for r in runs]
 
+# ─── Best run ranking (used by Summary + Export tabs) ─────────────────────
+scored_runs = [(i, r) for i, r in enumerate(runs) if r["kpi"].score is not None]
+best_idx = 0
+if scored_runs:
+    scored_runs.sort(key=lambda x: x[1]["kpi"].score, reverse=True)
+    best_idx = scored_runs[0][0]
+
 # ─── Top-level navigation tabs ────────────────────────────────────────────
 nav_summary, nav_charts, nav_diagnostics, nav_export = st.tabs(
     ["Summary", "Charts", "Diagnostics", "Export"]
@@ -465,10 +614,8 @@ nav_summary, nav_charts, nav_diagnostics, nav_export = st.tabs(
 with nav_summary:
 
     # Best run ranking
-    scored_runs = [(i, r) for i, r in enumerate(runs) if r["kpi"].score is not None]
     if scored_runs:
-        scored_runs.sort(key=lambda x: x[1]["kpi"].score, reverse=True)
-        best_idx, best_run = scored_runs[0]
+        best_run = runs[best_idx]
         st.success(
             f"**Best run:** {best_run['meta'].label} — Score **{best_run['kpi'].score}**/100"
         )
@@ -736,7 +883,7 @@ with nav_export:
     st.markdown("#### Download Results")
     st.caption("Export the summary table or full KPI data for reporting.")
 
-    col_csv, col_json = st.columns(2)
+    col_csv, col_json, col_pdf = st.columns(3)
 
     with col_csv:
         csv_buf = summary_df.to_csv(index=False)
@@ -756,5 +903,18 @@ with nav_export:
             json_buf,
             file_name="all_runs.json",
             mime="application/json",
+            use_container_width=True,
+        )
+
+    with col_pdf:
+        # Use best run if scored, otherwise first run
+        pdf_run_idx = best_idx
+        pdf_run = runs[pdf_run_idx]
+        pdf_bytes = generate_pdf(pdf_run, thresholds)
+        st.download_button(
+            "Download report.pdf",
+            pdf_bytes,
+            file_name="report.pdf",
+            mime="application/pdf",
             use_container_width=True,
         )

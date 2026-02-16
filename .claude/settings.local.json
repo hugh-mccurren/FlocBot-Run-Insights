@@ -4,7 +4,10 @@
       "Bash(pip install:*)",
       "Bash(.venv/Scripts/python:*)",
       "Bash(git checkout -- .streamlit/config.toml run_insights.py)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(where:*)",
+      "Bash(/c/Users/mccur/Projects/FlocBot/FlocBot_RunInsights/.venv/Scripts/pip.exe install:*)",
+      "Bash(/c/Users/mccur/Projects/FlocBot/FlocBot_RunInsights/.venv/Scripts/python.exe:*)"
     ]
   }
 }
