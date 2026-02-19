@@ -31,97 +31,236 @@ st.set_page_config(
     layout="wide",
 )
 
-# ─── Custom CSS for card styling ──────────────────────────────────────────
+# ─── Design system: single CSS injection ─────────────────────────────────
+# Accent: #0284C7 (sky-600, clean water blue)
+# Surface: #FFFFFF   Background: #F8FAFB   Tinted: #EFF6FA
+# Text: #1B2A3D (primary)  #526580 (secondary)  #8C9BB0 (muted)
+# Border: rgba(2,132,199,0.10)  Shadow: 0 1px 3px rgba(27,42,61,0.06)
 st.markdown("""
 <style>
-    /* Compact header */
-    .block-container { padding-top: 2.2rem; }
+    /* ── Global background ── */
+    .stApp {
+        background: linear-gradient(168deg, #F8FAFB 0%, #EFF6FA 50%, #F4F8FB 100%);
+    }
 
-    /* Metric cards */
+    /* ── Main content area ── */
+    .block-container {
+        padding-top: 2.8rem;
+        padding-bottom: 2rem;
+        max-width: 1200px;
+    }
+
+    /* ── Typography ── */
+    h1, h2 {
+        color: #1B2A3D !important;
+        font-weight: 700 !important;
+        letter-spacing: -0.02em;
+    }
+    h3, h4 {
+        color: #1B2A3D !important;
+        font-weight: 600 !important;
+        letter-spacing: -0.01em;
+    }
+    p, li, span, .stMarkdown {
+        color: #334155;
+    }
+
+    /* ── Sidebar ── */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #EFF6FA 0%, #E8F1F7 100%);
+        border-right: 1px solid rgba(2,132,199,0.08);
+    }
+    section[data-testid="stSidebar"] .stMarkdown h3 {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #526580;
+        margin-top: 0.75rem;
+        margin-bottom: 0.25rem;
+        font-weight: 600;
+    }
+    section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+        padding-top: 1.5rem;
+    }
+
+    /* ── File uploader dropzone ── */
+    section[data-testid="stSidebar"] [data-testid="stFileUploader"] > div:first-child {
+        border: 2px dashed rgba(2,132,199,0.25) !important;
+        border-radius: 12px !important;
+        background: rgba(255,255,255,0.6) !important;
+        transition: border-color 0.2s, background 0.2s;
+    }
+    section[data-testid="stSidebar"] [data-testid="stFileUploader"] > div:first-child:hover {
+        border-color: rgba(2,132,199,0.50) !important;
+        background: rgba(255,255,255,0.85) !important;
+    }
+
+    /* ── Tabs styling ── */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0;
+        background: transparent;
+        border-bottom: 2px solid rgba(2,132,199,0.08);
+    }
+    .stTabs [data-baseweb="tab"] {
+        padding: 10px 24px;
+        font-size: 0.88rem;
+        font-weight: 500;
+        color: #526580;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        transition: color 0.2s, border-color 0.2s;
+        background: transparent !important;
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        color: #0284C7;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #0284C7 !important;
+        font-weight: 600 !important;
+        border-bottom: 2px solid #0284C7 !important;
+    }
+    .stTabs [data-baseweb="tab-highlight"] {
+        background-color: #0284C7 !important;
+    }
+
+    /* ── Metric cards ── */
     div[data-testid="stMetric"] {
-        background: #F8FAFC;
-        border: 1px solid #E2E8F0;
-        border-left: 3px solid #2563EB;
-        border-radius: 8px;
-        padding: 12px 16px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        background: #FFFFFF;
+        border: 1px solid rgba(2,132,199,0.10);
+        border-top: 3px solid #0284C7;
+        border-radius: 12px;
+        padding: 14px 16px;
+        box-shadow: 0 1px 3px rgba(27,42,61,0.06);
+        transition: box-shadow 0.2s, transform 0.2s;
+    }
+    div[data-testid="stMetric"]:hover {
+        box-shadow: 0 4px 12px rgba(27,42,61,0.10);
+        transform: translateY(-1px);
     }
     div[data-testid="stMetric"] label {
-        color: #64748B;
-        font-size: 0.78rem;
-        letter-spacing: 0.04em;
+        color: #526580 !important;
+        font-size: 0.72rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        font-weight: 500;
     }
     div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        font-size: 1.3rem;
-        font-weight: 600;
-        color: #1E293B;
+        font-size: 1.35rem;
+        font-weight: 700;
+        color: #1B2A3D !important;
     }
 
-    /* Score progress bar – sits inside the Score column, right under the metric */
+    /* ── Score progress bar ── */
     .score-bar-track {
         background: #E2E8F0;
         border-radius: 6px;
-        height: 8px;
-        margin-top: -8px;
+        height: 6px;
+        margin-top: -6px;
         overflow: hidden;
     }
     .score-bar-fill {
         height: 100%;
         border-radius: 6px;
-        transition: width 0.4s ease;
+        transition: width 0.5s ease;
     }
 
-    /* Chart card wrappers */
+    /* ── Chart card wrappers ── */
     .chart-card {
         background: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 10px;
-        padding: 20px 16px 8px 16px;
-        margin-bottom: 16px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        border: 1px solid rgba(2,132,199,0.08);
+        border-radius: 16px;
+        padding: 24px 20px 12px 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 1px 3px rgba(27,42,61,0.06);
     }
     .chart-card h5 {
         margin: 0 0 2px 0;
-        font-size: 0.95rem;
+        font-size: 0.92rem;
         font-weight: 600;
-        color: #1E293B;
+        color: #1B2A3D;
+        letter-spacing: -0.01em;
     }
     .chart-card .chart-subtitle {
-        margin: 0 0 8px 0;
-        font-size: 0.78rem;
-        color: #94A3B8;
+        margin: 0 0 12px 0;
+        font-size: 0.76rem;
+        color: #8C9BB0;
     }
 
-    /* Section dividers */
-    hr { border-color: #E2E8F0; margin: 1.5rem 0; }
+    /* ── Containers / bordered panels ── */
+    [data-testid="stContainer"] > div:has(> [data-testid="stVerticalBlock"]) {
+        border-radius: 16px !important;
+        border-color: rgba(2,132,199,0.10) !important;
+        background: #FFFFFF !important;
+        box-shadow: 0 1px 3px rgba(27,42,61,0.06);
+    }
 
-    /* Branded header accent */
+    /* ── Section dividers ── */
+    hr {
+        border-color: rgba(2,132,199,0.08);
+        margin: 1.8rem 0;
+    }
+
+    /* ── Branded header accent ── */
     .header-accent {
         height: 3px;
-        background: linear-gradient(90deg, #2563EB 0%, #60A5FA 50%, transparent 100%);
+        background: linear-gradient(90deg, #0284C7 0%, #38BDF8 40%, #BAE6FD 70%, transparent 100%);
         border-radius: 2px;
-        margin-bottom: 12px;
+        margin-bottom: 16px;
     }
 
-    /* Sidebar polish */
-    section[data-testid="stSidebar"] {
-        background: #F8FAFC;
+    /* ── Success / info / warning banners ── */
+    [data-testid="stAlert"] {
+        border-radius: 12px;
+        border-left-width: 4px;
     }
-    section[data-testid="stSidebar"] .stMarkdown h3 {
+
+    /* ── Buttons ── */
+    .stDownloadButton > button {
+        border-radius: 10px;
+        font-weight: 500;
         font-size: 0.85rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: #64748B;
-        margin-top: 0.75rem;
-        margin-bottom: 0.25rem;
+        border: 1px solid rgba(2,132,199,0.15);
+        transition: all 0.2s;
+    }
+    .stDownloadButton > button:hover {
+        border-color: #0284C7;
+        box-shadow: 0 2px 8px rgba(2,132,199,0.15);
+    }
+
+    /* ── Expander ── */
+    [data-testid="stExpander"] {
+        border-radius: 12px;
+        border: 1px solid rgba(2,132,199,0.08);
+        background: #FFFFFF;
+    }
+
+    /* ── Dataframe ── */
+    [data-testid="stDataFrame"] {
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid rgba(2,132,199,0.08);
+    }
+
+    /* ── Welcome page ── */
+    .welcome-card {
+        background: #FFFFFF;
+        border: 1px solid rgba(2,132,199,0.10);
+        border-radius: 20px;
+        padding: 40px 36px;
+        box-shadow: 0 2px 8px rgba(27,42,61,0.06);
+        max-width: 640px;
+        margin: 2rem auto;
+    }
+    .welcome-card h2 {
+        margin-top: 0;
     }
 </style>
 """, unsafe_allow_html=True)
 
 PHASE_COLORS = {
-    "rapid_mix": "rgba(255, 99, 71, 0.12)",
-    "flocculation": "rgba(60, 179, 113, 0.12)",
-    "settling": "rgba(100, 149, 237, 0.12)",
+    "rapid_mix": "rgba(239, 68, 68, 0.08)",
+    "flocculation": "rgba(16, 185, 129, 0.08)",
+    "settling": "rgba(2, 132, 199, 0.08)",
 }
 PHASE_LABELS = {
     "rapid_mix": "Rapid Mix",
@@ -129,20 +268,24 @@ PHASE_LABELS = {
     "settling": "Settling",
 }
 
-CHART_HEIGHT = 520
+CHART_HEIGHT = 500
 CHART_LAYOUT = dict(
     template="plotly_white",
     height=CHART_HEIGHT,
-    margin=dict(t=110, b=48, l=56, r=24),
+    margin=dict(t=100, b=48, l=56, r=24),
     legend=dict(
         orientation="h",
         yanchor="bottom",
         y=1.06,
         xanchor="center",
         x=0.5,
-        font=dict(size=11),
+        font=dict(size=11, color="#526580"),
     ),
-    font=dict(family="Inter, system-ui, sans-serif", size=12),
+    font=dict(family="Inter, -apple-system, system-ui, sans-serif", size=12, color="#334155"),
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="#FFFFFF",
+    xaxis=dict(gridcolor="rgba(2,132,199,0.06)", zerolinecolor="rgba(2,132,199,0.10)"),
+    yaxis=dict(gridcolor="rgba(2,132,199,0.06)", zerolinecolor="rgba(2,132,199,0.10)"),
 )
 
 # ─── Sidebar ──────────────────────────────────────────────────────────────
@@ -230,17 +373,19 @@ def parse_uploads(files):
 
 
 if not uploaded_files:
-    st.markdown("## Welcome to FlocBot Run Insights")
-    st.caption("Upload one or more RoboJar Excel exports using the sidebar to get started.")
-    st.markdown(
-        """
-        - Automatic phase detection (Rapid Mix / Flocculation / Settling)
-        - Operator-relevant KPIs and an overall run score
-        - Interactive Plotly charts with phase shading
-        - Multi-run comparison with side-by-side metrics
-        - CSV / JSON export for reporting
-        """
-    )
+    st.markdown("""<div class="welcome-card">
+        <h2>Welcome to FlocBot Run Insights</h2>
+        <p style="color:#526580; margin-bottom:20px;">
+            Upload one or more RoboJar Excel exports using the sidebar to get started.
+        </p>
+        <ul style="color:#334155; line-height:2;">
+            <li>Automatic phase detection (Rapid Mix / Flocculation / Settling)</li>
+            <li>Operator-relevant KPIs and an overall run score</li>
+            <li>Interactive Plotly charts with phase shading</li>
+            <li>Multi-run comparison with side-by-side metrics</li>
+            <li>CSV / JSON / PDF export for reporting</li>
+        </ul>
+    </div>""", unsafe_allow_html=True)
     st.stop()
 
 # --- Parse then compute KPIs with current sidebar values ---
@@ -307,13 +452,13 @@ def plot_diameter(df, phases, kpi, meta_label, thresholds_to_show):
     # Settling start marker
     se = phase_by_name(phases, "settling")
     if se:
-        fig.add_vline(x=se.start_min, line_dash="dash", line_color="blue")
+        fig.add_vline(x=se.start_min, line_dash="dash", line_color="#0284C7")
         fig.add_annotation(
             x=se.start_min, y=1, yref="paper",
             xanchor="right", yanchor="top",
             text="Settle start", showarrow=False,
             xshift=-6,
-            font=dict(size=11, color="blue"),
+            font=dict(size=11, color="#0284C7"),
         )
 
     fig.update_layout(
@@ -644,11 +789,11 @@ with nav_summary:
                 st.metric("Score", f"{kpi.score}/100" if kpi.score is not None else "N/A")
                 pct = kpi.score if kpi.score is not None else 0
                 if pct >= 70:
-                    bar_color = "#10B981"
+                    bar_color = "#059669"
                 elif pct >= 40:
-                    bar_color = "#F59E0B"
+                    bar_color = "#D97706"
                 else:
-                    bar_color = "#EF4444"
+                    bar_color = "#DC2626"
                 st.markdown(
                     f'<div class="score-bar-track">'
                     f'<div class="score-bar-fill" style="width:{pct}%;background:{bar_color};"></div>'
@@ -806,7 +951,7 @@ with nav_charts:
         with chart_run_tabs[-1]:
             _chart_card_open("Overlay: Diameter", "All runs compared on a single axis")
             fig_cmp = go.Figure()
-            colors = ["#2563EB", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899"]
+            colors = ["#0284C7", "#E11D48", "#059669", "#D97706", "#7C3AED", "#DB2777"]
             for i, run in enumerate(runs):
                 color = colors[i % len(colors)]
                 fig_cmp.add_trace(go.Scatter(
