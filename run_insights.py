@@ -241,6 +241,17 @@ st.markdown("""
         border: 1px solid rgba(2,132,199,0.08);
     }
 
+    /* ── Select boxes / dropdowns ── */
+    [data-testid="stSelectbox"] > div > div {
+        background: #FFFFFF;
+        border: 1.5px solid rgba(2,132,199,0.20);
+        border-radius: 10px;
+        box-shadow: 0 1px 3px rgba(27,42,61,0.06);
+    }
+    [data-testid="stSelectbox"] > div > div:hover {
+        border-color: #0284C7;
+    }
+
     /* ── Welcome page ── */
     .welcome-card {
         background: #FFFFFF;
