@@ -1,6 +1,7 @@
 """
 flocbot_parser.py – Parse RoboJar/FlocBot Excel exports into standardized DataFrames.
 """
+# v2 – added short_label property for concise chart legends
 
 import re
 import pandas as pd
