@@ -213,13 +213,12 @@ with st.sidebar:
 # Processing
 # ═══════════════════════════════════════════════════════════════════════════
 
-@st.cache_data(show_spinner="Parsing files …")
-def parse_uploads(_files):
-    """Parse all uploaded files (expensive I/O + phase detection).
+def parse_uploads(files):
+    """Parse all uploaded files (I/O + phase detection).
     Returns list of dicts with keys: df, meta, phases; and a list of errors."""
     parsed = []
     errors = []
-    for f in _files:
+    for f in files:
         try:
             f.seek(0)
             df, meta = parse_file(f)
@@ -244,7 +243,7 @@ if not uploaded_files:
     )
     st.stop()
 
-# --- Parse (cached) then compute KPIs with current sidebar values ---
+# --- Parse then compute KPIs with current sidebar values ---
 parsed, errors = parse_uploads(uploaded_files)
 
 runs = []
