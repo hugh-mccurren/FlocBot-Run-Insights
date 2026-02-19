@@ -30,6 +30,15 @@ class RunMetadata:
             parts.append(self.protocol_title)
         return " | ".join(parts) if parts else self.filename
 
+    @property
+    def short_label(self) -> str:
+        """Concise label for chart legends — dose only, with fallbacks."""
+        if self.run_dosage:
+            return f"Dose {self.run_dosage}"
+        if self.protocol_title:
+            return self.protocol_title
+        return self.filename
+
 
 # ---------------------------------------------------------------------------
 # Column name mapping – normalizes whatever the export provides

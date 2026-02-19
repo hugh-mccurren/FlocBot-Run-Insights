@@ -286,11 +286,10 @@ def add_phase_shading(fig, phases: list[Phase], row=None, col=None):
 
 def plot_diameter(df, phases, kpi, meta_label, thresholds_to_show):
     fig = go.Figure()
-    legend_label = (meta_label[:40] + "…") if len(meta_label) > 40 else meta_label
     fig.add_trace(go.Scatter(
         x=df["time_min"], y=df.get("diameter_um"),
         mode="lines+markers", marker=dict(size=3),
-        name=legend_label,
+        name=meta_label,
         hovertemplate="Time: %{x:.1f} min<br>Diameter: %{y:.0f} μm<extra></extra>",
     ))
     add_phase_shading(fig, phases)
@@ -528,7 +527,7 @@ def _pdf_add_run(pdf, run, thresholds_to_show, chart_w=190):
     pdf.ln(1)
 
     # Diameter chart
-    fig_diam = plot_diameter(df, phases, kpi, meta.label, thresholds_to_show)
+    fig_diam = plot_diameter(df, phases, kpi, meta.short_label, thresholds_to_show)
     fig_diam.update_layout(height=380, margin=dict(t=80, b=40, l=50, r=20))
     png_diam = _fig_to_png(fig_diam, width=900, height=380)
     img_diam = io.BytesIO(png_diam)
@@ -540,7 +539,7 @@ def _pdf_add_run(pdf, run, thresholds_to_show, chart_w=190):
     if "vol_conc_mm3_L" in df.columns:
         if pdf.get_y() > 200:
             pdf.add_page()
-        fig_vc = plot_vol_conc(df, phases, kpi, meta.label)
+        fig_vc = plot_vol_conc(df, phases, kpi, meta.short_label)
         fig_vc.update_layout(height=380, margin=dict(t=80, b=40, l=50, r=20))
         png_vc = _fig_to_png(fig_vc, width=900, height=380)
         img_vc = io.BytesIO(png_vc)
@@ -605,6 +604,7 @@ st.caption(f'{len(runs)} run{"s" if len(runs) != 1 else ""} loaded')
 st.markdown('<div class="header-accent"></div>', unsafe_allow_html=True)
 
 run_labels = [r["meta"].label for r in runs]
+chart_labels = [r["meta"].short_label for r in runs]
 
 # ─── Best run ranking (used by Summary + Export tabs) ─────────────────────
 scored_runs = [(i, r) for i, r in enumerate(runs) if r["kpi"].score is not None]
@@ -782,11 +782,11 @@ with nav_charts:
         run = runs[0]
         df, meta, phases, kpi = run["df"], run["meta"], run["phases"], run["kpi"]
         _chart_card_open("Floc Diameter", "Mean particle diameter over the run duration")
-        st.plotly_chart(plot_diameter(df, phases, kpi, meta.label, thresholds), use_container_width=True)
+        st.plotly_chart(plot_diameter(df, phases, kpi, meta.short_label, thresholds), use_container_width=True)
         _chart_card_close()
         if "vol_conc_mm3_L" in df.columns:
             _chart_card_open("Volume Concentration", "Particle volume concentration over time")
-            st.plotly_chart(plot_vol_conc(df, phases, kpi, meta.label), use_container_width=True)
+            st.plotly_chart(plot_vol_conc(df, phases, kpi, meta.short_label), use_container_width=True)
             _chart_card_close()
     else:
         chart_run_tabs = st.tabs(run_labels + ["Overlay"])
@@ -795,11 +795,11 @@ with nav_charts:
             df, meta, phases, kpi = run["df"], run["meta"], run["phases"], run["kpi"]
             with tab:
                 _chart_card_open("Floc Diameter", "Mean particle diameter over the run duration")
-                st.plotly_chart(plot_diameter(df, phases, kpi, meta.label, thresholds), use_container_width=True)
+                st.plotly_chart(plot_diameter(df, phases, kpi, meta.short_label, thresholds), use_container_width=True)
                 _chart_card_close()
                 if "vol_conc_mm3_L" in df.columns:
                     _chart_card_open("Volume Concentration", "Particle volume concentration over time")
-                    st.plotly_chart(plot_vol_conc(df, phases, kpi, meta.label), use_container_width=True)
+                    st.plotly_chart(plot_vol_conc(df, phases, kpi, meta.short_label), use_container_width=True)
                     _chart_card_close()
 
         # Overlay tab
@@ -812,7 +812,7 @@ with nav_charts:
                 fig_cmp.add_trace(go.Scatter(
                     x=run["df"]["time_min"], y=run["df"].get("diameter_um"),
                     mode="lines+markers", marker=dict(size=3, color=color),
-                    name=run_labels[i],
+                    name=chart_labels[i],
                 ))
             add_phase_shading(fig_cmp, runs[0]["phases"])
             fig_cmp.update_layout(
@@ -832,7 +832,7 @@ with nav_charts:
                     fig_vc.add_trace(go.Scatter(
                         x=run["df"]["time_min"], y=run["df"]["vol_conc_mm3_L"],
                         mode="lines+markers", marker=dict(size=3, color=color),
-                        name=run["meta"].label,
+                        name=run["meta"].short_label,
                     ))
                 add_phase_shading(fig_vc, vol_runs[0]["phases"])
                 fig_vc.update_layout(
@@ -862,7 +862,7 @@ with nav_diagnostics:
                 st.caption("No data quality issues detected.")
 
             # Floc count chart
-            fc_fig = plot_floc_count(df, phases, meta.label)
+            fc_fig = plot_floc_count(df, phases, meta.short_label)
             if fc_fig:
                 _chart_card_open("Floc Count", "Particle count per mL — useful for detecting low-count artifacts")
                 st.plotly_chart(fc_fig, use_container_width=True)
