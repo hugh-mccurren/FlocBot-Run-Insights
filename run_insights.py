@@ -456,32 +456,14 @@ def _pdf_safe(text):
     )
 
 
-def generate_pdf(run, thresholds_to_show):
-    """Build a 1–2 page PDF report for a single run and return bytes."""
+def _pdf_add_run(pdf, run, thresholds_to_show, chart_w=190):
+    """Add a single run's metadata, KPIs, and charts to the PDF."""
     meta = run["meta"]
     kpi = run["kpi"]
     df = run["df"]
     phases = run["phases"]
 
-    pdf = FPDF(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=20)
-    pdf.add_page()
-
-    # ── Title block ──
-    pdf.set_font("Helvetica", "B", 20)
-    pdf.set_text_color(37, 99, 235)  # #2563EB
-    pdf.cell(0, 10, "FlocBot Run Report", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_draw_color(37, 99, 235)
-    pdf.set_line_width(0.6)
-    pdf.line(10, pdf.get_y(), 120, pdf.get_y())
-    pdf.ln(4)
-
-    # ── Metadata section ──
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(100, 116, 139)  # #64748B
-    pdf.cell(0, 5, f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(3)
-
+    # ── Run heading ──
     pdf.set_font("Helvetica", "B", 11)
     pdf.set_text_color(30, 41, 59)  # #1E293B
     pdf.cell(0, 6, _pdf_safe(meta.label), new_x="LMARGIN", new_y="NEXT")
@@ -545,8 +527,6 @@ def generate_pdf(run, thresholds_to_show):
     pdf.cell(0, 7, "Charts", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(1)
 
-    chart_w = 190  # mm, page width minus margins
-
     # Diameter chart
     fig_diam = plot_diameter(df, phases, kpi, meta.label, thresholds_to_show)
     fig_diam.update_layout(height=380, margin=dict(t=80, b=40, l=50, r=20))
@@ -567,7 +547,38 @@ def generate_pdf(run, thresholds_to_show):
         img_vc.name = "volconc.png"
         pdf.image(img_vc, x=10, w=chart_w)
 
-    # Footer
+
+def generate_pdf(all_runs, thresholds_to_show):
+    """Build a multi-page PDF report for all uploaded runs and return bytes."""
+
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.add_page()
+
+    # ── Title block ──
+    pdf.set_font("Helvetica", "B", 20)
+    pdf.set_text_color(37, 99, 235)  # #2563EB
+    pdf.cell(0, 10, "FlocBot Run Report", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_draw_color(37, 99, 235)
+    pdf.set_line_width(0.6)
+    pdf.line(10, pdf.get_y(), 120, pdf.get_y())
+    pdf.ln(4)
+
+    # ── Generated timestamp ──
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(100, 116, 139)  # #64748B
+    n_runs = len(all_runs)
+    pdf.cell(0, 5, f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  {n_runs} run{'s' if n_runs != 1 else ''}", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
+
+    chart_w = 190  # mm, page width minus margins
+
+    for run_i, run in enumerate(all_runs):
+        if run_i > 0:
+            pdf.add_page()
+        _pdf_add_run(pdf, run, thresholds_to_show, chart_w)
+
+    # Footer on last page
     pdf.set_y(-15)
     pdf.set_font("Helvetica", "I", 7)
     pdf.set_text_color(148, 163, 184)  # #94A3B8
@@ -906,10 +917,7 @@ with nav_export:
         )
 
     with col_pdf:
-        # Use best run if scored, otherwise first run
-        pdf_run_idx = best_idx
-        pdf_run = runs[pdf_run_idx]
-        pdf_bytes = generate_pdf(pdf_run, thresholds)
+        pdf_bytes = generate_pdf(runs, thresholds)
         st.download_button(
             "Download report.pdf",
             pdf_bytes,
