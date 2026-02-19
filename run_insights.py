@@ -727,7 +727,7 @@ with nav_summary:
             ("Pre-settle Ø", ka.pre_settle_diameter_um, kb.pre_settle_diameter_um, " μm", True),
             ("Plateau CV", ka.plateau_cv, kb.plateau_cv, "%", False),
             ("Settling t50", ka.t50_min, kb.t50_min, " min", False),
-            ("Settling t10", ka.t10_min, kb.t10_min, " min", False),
+            ("Settling t90", ka.t10_min, kb.t10_min, " min", False),
         ]
         for thr in thresholds:
             va = ka.time_to_thresholds_min.get(thr)
