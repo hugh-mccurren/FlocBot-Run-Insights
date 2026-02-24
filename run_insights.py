@@ -13,6 +13,9 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from fpdf import FPDF
 
+import keep_alive
+keep_alive.start()
+
 from flocbot_parser import parse_file, RunMetadata
 from flocbot_metrics import (
     detect_phases,
