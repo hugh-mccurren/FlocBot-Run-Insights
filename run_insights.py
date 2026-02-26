@@ -7,32 +7,65 @@ import io
 import json
 from datetime import datetime
 import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from fpdf import FPDF
 
+# ─── Keep-alive (lightweight, no heavy deps) ─────────────────────────────
 import keep_alive
 keep_alive.start()
 
-from flocbot_parser import parse_file, RunMetadata
-from flocbot_metrics import (
-    detect_phases,
-    compute_kpis,
-    compute_score,
-    Phase,
-    RunKPIs,
-    DEFAULT_WEIGHTS,
-    phase_by_name,
-)
-
-# ─── Page config ──────────────────────────────────────────────────────────
+# ─── Page config (must come before any other st.* calls) ─────────────────
 st.set_page_config(
     page_title="FlocBot Run Insights",
     page_icon="🔬",
     layout="wide",
 )
+
+# ─── UptimeRobot keyword marker (hidden HTML, renders on every load) ─────
+st.markdown("<!-- APP_READY_FLOCBOT -->", unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Lazy imports — deferred so the page shell renders immediately on cold boot
+# ═══════════════════════════════════════════════════════════════════════════
+
+@st.cache_resource(show_spinner=False)
+def _load_heavy_deps():
+    """Import heavy libraries once and cache across reruns."""
+    import pandas as _pd
+    import numpy as _np
+    import plotly.graph_objects as _go
+    from plotly.subplots import make_subplots as _make_subplots
+    from fpdf import FPDF as _FPDF
+    from flocbot_parser import parse_file as _parse_file, RunMetadata as _RunMetadata
+    from flocbot_metrics import (
+        detect_phases as _detect_phases,
+        compute_kpis as _compute_kpis,
+        compute_score as _compute_score,
+        Phase as _Phase,
+        RunKPIs as _RunKPIs,
+        DEFAULT_WEIGHTS as _DEFAULT_WEIGHTS,
+        phase_by_name as _phase_by_name,
+    )
+    return {
+        "pd": _pd,
+        "np": _np,
+        "go": _go,
+        "make_subplots": _make_subplots,
+        "FPDF": _FPDF,
+        "parse_file": _parse_file,
+        "RunMetadata": _RunMetadata,
+        "detect_phases": _detect_phases,
+        "compute_kpis": _compute_kpis,
+        "compute_score": _compute_score,
+        "Phase": _Phase,
+        "RunKPIs": _RunKPIs,
+        "DEFAULT_WEIGHTS": _DEFAULT_WEIGHTS,
+        "phase_by_name": _phase_by_name,
+    }
+
+
+def _deps():
+    """Shorthand accessor — always returns the cached dict."""
+    return _load_heavy_deps()
+
 
 # ─── Design system: single CSS injection ─────────────────────────────────
 # Accent: #0284C7 (sky-600, clean water blue)
@@ -367,6 +400,52 @@ with st.sidebar:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Welcome screen (shown before heavy deps are needed)
+# ═══════════════════════════════════════════════════════════════════════════
+
+if not uploaded_files:
+    st.markdown("""<div class="welcome-card">
+        <h2>Welcome to FlocBot Run Insights</h2>
+        <p style="color:#526580; margin-bottom:20px;">
+            Upload one or more RoboJar Excel exports using the sidebar to get started.
+        </p>
+        <ul style="color:#334155; line-height:2;">
+            <li>Automatic phase detection (Rapid Mix / Flocculation / Settling)</li>
+            <li>Operator-relevant KPIs and an overall run score</li>
+            <li>Interactive Plotly charts with phase shading</li>
+            <li>Multi-run comparison with side-by-side metrics</li>
+            <li>CSV / JSON / PDF export for reporting</li>
+        </ul>
+    </div>""", unsafe_allow_html=True)
+    st.stop()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Heavy deps loaded only once files are uploaded
+# ═══════════════════════════════════════════════════════════════════════════
+
+with st.spinner("Loading analysis libraries..."):
+    try:
+        D = _deps()
+    except Exception as e:
+        st.error(f"Failed to load required libraries: {e}")
+        st.info("If this persists, check that all packages in requirements.txt are installable.")
+        st.stop()
+
+pd = D["pd"]
+np = D["np"]
+go = D["go"]
+FPDF = D["FPDF"]
+parse_file = D["parse_file"]
+detect_phases = D["detect_phases"]
+compute_kpis = D["compute_kpis"]
+compute_score = D["compute_score"]
+Phase = D["Phase"]
+RunKPIs = D["RunKPIs"]
+phase_by_name = D["phase_by_name"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Processing
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -385,22 +464,6 @@ def parse_uploads(files):
             errors.append((getattr(f, "name", "?"), str(e)))
     return parsed, errors
 
-
-if not uploaded_files:
-    st.markdown("""<div class="welcome-card">
-        <h2>Welcome to FlocBot Run Insights</h2>
-        <p style="color:#526580; margin-bottom:20px;">
-            Upload one or more RoboJar Excel exports using the sidebar to get started.
-        </p>
-        <ul style="color:#334155; line-height:2;">
-            <li>Automatic phase detection (Rapid Mix / Flocculation / Settling)</li>
-            <li>Operator-relevant KPIs and an overall run score</li>
-            <li>Interactive Plotly charts with phase shading</li>
-            <li>Multi-run comparison with side-by-side metrics</li>
-            <li>CSV / JSON / PDF export for reporting</li>
-        </ul>
-    </div>""", unsafe_allow_html=True)
-    st.stop()
 
 # --- Parse then compute KPIs with current sidebar values ---
 parsed, errors = parse_uploads(uploaded_files)
@@ -423,7 +486,7 @@ if not runs:
 # Helpers: plotting
 # ═══════════════════════════════════════════════════════════════════════════
 
-def add_phase_shading(fig, phases: list[Phase], row=None, col=None):
+def add_phase_shading(fig, phases: list, row=None, col=None):
     for p in phases:
         fig.add_vrect(
             x0=p.start_min, x1=p.end_min,
@@ -595,8 +658,24 @@ def kpi_to_dict(meta, kpi):
 
 
 def _fig_to_png(fig, width=900, height=400):
-    """Render a Plotly figure to PNG bytes via kaleido."""
-    return fig.to_image(format="png", width=width, height=height, scale=2)
+    """Render a Plotly figure to PNG bytes via kaleido, with graceful fallback."""
+    try:
+        return fig.to_image(format="png", width=width, height=height, scale=2)
+    except Exception:
+        # kaleido unavailable or broken — return a 1x1 transparent PNG placeholder
+        import struct, zlib
+        def _minimal_png():
+            sig = b'\x89PNG\r\n\x1a\n'
+            ihdr_data = struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)
+            ihdr_crc = zlib.crc32(b'IHDR' + ihdr_data) & 0xffffffff
+            ihdr = struct.pack('>I', 13) + b'IHDR' + ihdr_data + struct.pack('>I', ihdr_crc)
+            raw = zlib.compress(b'\x00\x00\x00\x00')
+            idat_crc = zlib.crc32(b'IDAT' + raw) & 0xffffffff
+            idat = struct.pack('>I', len(raw)) + b'IDAT' + raw + struct.pack('>I', idat_crc)
+            iend_crc = zlib.crc32(b'IEND') & 0xffffffff
+            iend = struct.pack('>I', 0) + b'IEND' + struct.pack('>I', iend_crc)
+            return sig + ihdr + idat + iend
+        return _minimal_png()
 
 
 def _pdf_safe(text):
@@ -1076,11 +1155,16 @@ with nav_export:
         )
 
     with col_pdf:
-        pdf_bytes = generate_pdf(runs, thresholds)
-        st.download_button(
-            "Download report.pdf",
-            pdf_bytes,
-            file_name="report.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-        )
+        try:
+            pdf_bytes = generate_pdf(runs, thresholds)
+        except Exception as e:
+            pdf_bytes = None
+            st.warning(f"PDF generation failed: {e}")
+        if pdf_bytes:
+            st.download_button(
+                "Download report.pdf",
+                pdf_bytes,
+                file_name="report.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
