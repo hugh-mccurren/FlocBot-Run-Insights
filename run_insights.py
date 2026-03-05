@@ -44,6 +44,7 @@ def _load_heavy_deps():
         DEFAULT_WEIGHTS as _DEFAULT_WEIGHTS,
         phase_by_name as _phase_by_name,
     )
+    from ui_operator import show_operator_mode as _show_operator_mode
     return {
         "pd": _pd,
         "np": _np,
@@ -59,6 +60,7 @@ def _load_heavy_deps():
         "RunKPIs": _RunKPIs,
         "DEFAULT_WEIGHTS": _DEFAULT_WEIGHTS,
         "phase_by_name": _phase_by_name,
+        "show_operator_mode": _show_operator_mode,
     }
 
 
@@ -348,55 +350,73 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # ── Thresholds ──
-    st.markdown("### Diameter Thresholds")
-    default_thresholds = "250, 300, 350, 400, 450"
-    threshold_str = st.text_input(
-        "Thresholds (μm)",
-        default_thresholds,
-        help="Comma-separated diameter values for time-to-threshold metrics.",
+    # ── Mode selector ──
+    if "app_mode" not in st.session_state:
+        st.session_state["app_mode"] = "Operator (Simple)"
+    app_mode = st.radio(
+        "Dashboard Mode",
+        ["Operator (Simple)", "Advanced (Full)"],
+        key="app_mode",
+        help="Operator Mode shows a simplified traffic-light view. Advanced Mode shows full controls and tables.",
     )
-    st.caption("Comma-separated values in μm.")
-    try:
-        thresholds = [float(t.strip()) for t in threshold_str.split(",") if t.strip()]
-    except ValueError:
-        thresholds = [250, 300, 350, 400, 450]
-        st.warning("Invalid thresholds – using defaults.")
 
-    st.markdown("---")
+    # ── Advanced-only sidebar controls ──
+    thresholds = [250, 300, 350, 400, 450]
+    weights = None
+    score_threshold = 300.0
 
-    # ── Scoring weights (collapsed) ──
-    with st.expander("Advanced: Scoring Weights", expanded=False):
-        st.caption("Adjust relative importance of each metric.")
-        w_time = st.slider("Time to threshold", 0, 100, 30, key="w1")
-        w_diam = st.slider("Pre-settle diameter", 0, 100, 30, key="w2")
-        w_cv = st.slider("Plateau stability (CV)", 0, 100, 20, key="w3")
-        w_t50 = st.slider("Settling t50", 0, 100, 20, key="w4")
+    if app_mode == "Advanced (Full)":
+        st.markdown("---")
 
-        score_threshold = 300.0
-        score_thr_options = [t for t in thresholds if t > 0]
-        if score_thr_options:
-            score_threshold = st.selectbox(
-                "Threshold for scoring (μm)",
-                score_thr_options,
-                index=min(1, len(score_thr_options) - 1),
-                help="Which diameter threshold to use for the time-to-threshold score component.",
-            )
+        # ── Thresholds ──
+        st.markdown("### Diameter Thresholds")
+        default_thresholds = "250, 300, 350, 400, 450"
+        threshold_str = st.text_input(
+            "Thresholds (μm)",
+            default_thresholds,
+            help="Comma-separated diameter values for time-to-threshold metrics.",
+        )
+        st.caption("Comma-separated values in μm.")
+        try:
+            thresholds = [float(t.strip()) for t in threshold_str.split(",") if t.strip()]
+        except ValueError:
+            thresholds = [250, 300, 350, 400, 450]
+            st.warning("Invalid thresholds – using defaults.")
 
-        if st.button("Reset defaults", use_container_width=True):
-            for key in ["w1", "w2", "w3", "w4"]:
-                st.session_state.pop(key, None)
-            st.rerun()
+        st.markdown("---")
 
-    total_w = w_time + w_diam + w_cv + w_t50
-    if total_w == 0:
-        total_w = 1  # avoid div-by-zero
-    weights = {
-        "time_to_300": w_time / total_w,
-        "pre_settle_diameter": w_diam / total_w,
-        "plateau_cv": w_cv / total_w,
-        "settling_t50": w_t50 / total_w,
-    }
+        # ── Scoring weights (collapsed) ──
+        with st.expander("Advanced: Scoring Weights", expanded=False):
+            st.caption("Adjust relative importance of each metric.")
+            w_time = st.slider("Time to threshold", 0, 100, 30, key="w1")
+            w_diam = st.slider("Pre-settle diameter", 0, 100, 30, key="w2")
+            w_cv = st.slider("Plateau stability (CV)", 0, 100, 20, key="w3")
+            w_t50 = st.slider("Settling t50", 0, 100, 20, key="w4")
+
+            score_threshold = 300.0
+            score_thr_options = [t for t in thresholds if t > 0]
+            if score_thr_options:
+                score_threshold = st.selectbox(
+                    "Threshold for scoring (μm)",
+                    score_thr_options,
+                    index=min(1, len(score_thr_options) - 1),
+                    help="Which diameter threshold to use for the time-to-threshold score component.",
+                )
+
+            if st.button("Reset defaults", use_container_width=True):
+                for key in ["w1", "w2", "w3", "w4"]:
+                    st.session_state.pop(key, None)
+                st.rerun()
+
+        total_w = w_time + w_diam + w_cv + w_t50
+        if total_w == 0:
+            total_w = 1  # avoid div-by-zero
+        weights = {
+            "time_to_300": w_time / total_w,
+            "pre_settle_diameter": w_diam / total_w,
+            "plateau_cv": w_cv / total_w,
+            "settling_t50": w_t50 / total_w,
+        }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -471,7 +491,8 @@ parsed, errors = parse_uploads(uploaded_files)
 runs = []
 for p in parsed:
     kpi = compute_kpis(p["df"], p["phases"], thresholds=thresholds)
-    compute_score(kpi, weights=dict(weights), threshold_for_time=score_threshold)
+    score_weights = dict(weights) if weights is not None else None
+    compute_score(kpi, weights=score_weights, threshold_for_time=score_threshold)
     runs.append({"df": p["df"], "meta": p["meta"], "phases": p["phases"], "kpi": kpi})
 
 for fname, err in errors:
@@ -479,6 +500,22 @@ for fname, err in errors:
 
 if not runs:
     st.warning("No valid runs were parsed.")
+    st.stop()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Operator Mode (early exit – renders its own layout)
+# ═══════════════════════════════════════════════════════════════════════════
+
+if app_mode == "Operator (Simple)":
+    show_operator_mode = D["show_operator_mode"]
+    show_operator_mode(
+        st, runs, go,
+        phase_colors=PHASE_COLORS,
+        phase_labels=PHASE_LABELS,
+        chart_layout=CHART_LAYOUT,
+        phase_by_name=phase_by_name,
+    )
     st.stop()
 
 
