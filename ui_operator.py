@@ -11,6 +11,32 @@ from typing import Optional
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Metric selector configuration – single source of truth
+# ═══════════════════════════════════════════════════════════════════════════
+
+OPERATOR_METRICS = {
+    "diameter": {
+        "display_name": "Mean Floc Diameter",
+        "column": "diameter_um",
+        "y_axis_label": "Mean Diameter (\u00b5m)",
+        "chart_title": "Mean Floc Diameter vs Time",
+        "tooltip_template": "Time: %{x:.1f} min<br>Diameter: %{y:.0f} \u00b5m<extra></extra>",
+        "legend_label_suffix": "",
+    },
+    "vol_conc": {
+        "display_name": "Volume Concentration",
+        "column": "vol_conc_mm3_L",
+        "y_axis_label": "Vol. Concentration (mm\u00b3/L)",
+        "chart_title": "Volume Concentration vs Time",
+        "tooltip_template": "Time: %{x:.1f} min<br>Vol. Conc: %{y:.1f} mm\u00b3/L<extra></extra>",
+        "legend_label_suffix": "",
+    },
+}
+
+_DEFAULT_METRIC = "diameter"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Thresholds for traffic-light evaluation
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -214,19 +240,23 @@ def compare_runs(runs: list[dict]) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Simplified diameter plot (no threshold markers, cleaner)
+# Generic metric plot (configurable via OPERATOR_METRICS)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def plot_diameter_simple(df, phases, meta_label, go, phase_colors, phase_labels, chart_layout, phase_by_name):
-    """Diameter vs Time with phase shading only – no threshold stars or extra overlays."""
+def plot_metric_simple(df, phases, meta_label, go, phase_colors, phase_labels,
+                       chart_layout, phase_by_name, metric_key=_DEFAULT_METRIC):
+    """Plot the selected metric vs Time with phase shading – clean operator style."""
+    cfg = OPERATOR_METRICS[metric_key]
+    col = cfg["column"]
+
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=df["time_min"], y=df.get("diameter_um"),
+        x=df["time_min"], y=df.get(col),
         mode="lines+markers",
         marker=dict(size=3, color="#0284C7"),
         line=dict(color="#0284C7", width=2),
         name=meta_label,
-        hovertemplate="Time: %{x:.1f} min<br>Diameter: %{y:.0f} \u00b5m<extra></extra>",
+        hovertemplate=cfg["tooltip_template"],
     ))
 
     # Phase shading
@@ -252,13 +282,21 @@ def plot_diameter_simple(df, phases, meta_label, go, phase_colors, phase_labels,
                       line_width=1, opacity=0.5)
 
     fig.update_layout(
-        title=dict(text="Mean Floc Diameter vs Time", y=0.97,
+        title=dict(text=cfg["chart_title"], y=0.97,
                    yanchor="top", x=0.5, xanchor="center"),
         xaxis_title="Time (min)",
-        yaxis_title="Mean Diameter (\u00b5m)",
+        yaxis_title=cfg["y_axis_label"],
         **chart_layout,
     )
     return fig
+
+
+# Keep backward-compatible alias
+def plot_diameter_simple(df, phases, meta_label, go, phase_colors, phase_labels,
+                         chart_layout, phase_by_name):
+    return plot_metric_simple(df, phases, meta_label, go, phase_colors,
+                              phase_labels, chart_layout, phase_by_name,
+                              metric_key="diameter")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -492,11 +530,55 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
                 unsafe_allow_html=True,
             )
 
-    # ── D) ONE plot: Diameter vs Time ──
+    # ── D) Plot with metric selector ──
     st.markdown("---")
-    fig = plot_diameter_simple(
+
+    # Determine which metrics are available for the current run
+    available_metrics = {}
+    for key, cfg in OPERATOR_METRICS.items():
+        if cfg["column"] in df.columns:
+            available_metrics[key] = cfg["display_name"]
+        else:
+            available_metrics[key] = None  # mark unavailable
+
+    # Build selectbox options (only available metrics are selectable)
+    metric_options = [k for k, v in available_metrics.items() if v is not None]
+    metric_labels = {k: OPERATOR_METRICS[k]["display_name"] for k in metric_options}
+
+    # Default to diameter; if somehow missing, take first available
+    default_idx = metric_options.index(_DEFAULT_METRIC) if _DEFAULT_METRIC in metric_options else 0
+
+    # Guard: if the persisted selection is no longer available (e.g. user
+    # switched to a run without vol_conc), reset to default before the
+    # widget is created so Streamlit doesn't raise a mismatch error.
+    persisted = st.session_state.get("op_metric_select")
+    if persisted is not None and persisted not in metric_options:
+        st.session_state["op_metric_select"] = metric_options[default_idx]
+
+    # Compact row: selector + unavailability note
+    sel_col, note_col = st.columns([2, 3])
+    with sel_col:
+        selected_metric = st.selectbox(
+            "Y-axis metric",
+            metric_options,
+            index=default_idx,
+            format_func=lambda k: metric_labels[k],
+            key="op_metric_select",
+        )
+
+    # Show inline note for unavailable metrics
+    unavailable = [OPERATOR_METRICS[k]["display_name"]
+                   for k, v in available_metrics.items() if v is None]
+    if unavailable:
+        with note_col:
+            st.caption(
+                f"_{', '.join(unavailable)}_ not available in this export"
+            )
+
+    fig = plot_metric_simple(
         df, phases, meta.short_label,
         go, phase_colors, phase_labels, chart_layout, phase_by_name,
+        metric_key=selected_metric,
     )
     st.plotly_chart(fig, use_container_width=True)
 
