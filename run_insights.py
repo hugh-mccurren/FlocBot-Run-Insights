@@ -7,6 +7,7 @@ import io
 import json
 from datetime import datetime
 import streamlit as st
+from metric_help import METRIC_HELP, classify_flag
 
 # ─── Keep-alive (lightweight, no heavy deps) ─────────────────────────────
 import keep_alive
@@ -506,18 +507,24 @@ if not runs:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Root container – cleared on every rerun so mode-switch has no ghost UI
+# ═══════════════════════════════════════════════════════════════════════════
+root = st.empty()
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Operator Mode (early exit – renders its own layout)
 # ═══════════════════════════════════════════════════════════════════════════
 
 if app_mode == "Operator (Simple)":
-    from ui_operator import show_operator_mode
-    show_operator_mode(
-        st, runs, go,
-        phase_colors=PHASE_COLORS,
-        phase_labels=PHASE_LABELS,
-        chart_layout=CHART_LAYOUT,
-        phase_by_name=phase_by_name,
-    )
+    with root.container():
+        from ui_operator import show_operator_mode
+        show_operator_mode(
+            st, runs, go,
+            phase_colors=PHASE_COLORS,
+            phase_labels=PHASE_LABELS,
+            chart_layout=CHART_LAYOUT,
+            phase_by_name=phase_by_name,
+        )
     st.stop()
 
 
@@ -876,334 +883,373 @@ def _chart_card_close():
 # Main layout
 # ═══════════════════════════════════════════════════════════════════════════
 
-st.markdown(f'## FlocBot Run Insights')
-st.caption(f'{len(runs)} run{"s" if len(runs) != 1 else ""} loaded')
-st.markdown('<div class="header-accent"></div>', unsafe_allow_html=True)
 
-run_labels = [r["meta"].label for r in runs]
-chart_labels = [r["meta"].short_label for r in runs]
+with root.container():
+    st.markdown(f'## FlocBot Run Insights')
+    st.caption(f'{len(runs)} run{"s" if len(runs) != 1 else ""} loaded')
+    st.markdown('<div class="header-accent"></div>', unsafe_allow_html=True)
 
-# ─── Best run ranking (used by Summary + Export tabs) ─────────────────────
-scored_runs = [(i, r) for i, r in enumerate(runs) if r["kpi"].score is not None]
-best_idx = 0
-if scored_runs:
-    scored_runs.sort(key=lambda x: x[1]["kpi"].score, reverse=True)
-    best_idx = scored_runs[0][0]
+    run_labels = [r["meta"].label for r in runs]
+    chart_labels = [r["meta"].short_label for r in runs]
 
-# ─── Top-level navigation tabs ────────────────────────────────────────────
-nav_summary, nav_charts, nav_diagnostics, nav_export = st.tabs(
-    ["Summary", "Charts", "Diagnostics", "Export"]
-)
-
-# ═══════════════════════════════════════════════════════════════════════════
-# TAB: Summary
-# ═══════════════════════════════════════════════════════════════════════════
-with nav_summary:
-
-    # Best run ranking
+    # ─── Best run ranking (used by Summary + Export tabs) ─────────────────────
+    scored_runs = [(i, r) for i, r in enumerate(runs) if r["kpi"].score is not None]
+    best_idx = 0
     if scored_runs:
-        best_run = runs[best_idx]
-        st.success(
-            f"**Best run:** {best_run['meta'].label} — Score **{best_run['kpi'].score}**/100"
-        )
+        scored_runs.sort(key=lambda x: x[1]["kpi"].score, reverse=True)
+        best_idx = scored_runs[0][0]
 
-    # ── Per-run KPI cards ──
-    for run_idx, run in enumerate(runs):
-        kpi = run["kpi"]
-        meta = run["meta"]
-
-        with st.container(border=True):
-            st.markdown(f"#### {meta.label}")
-
-            # Row 1: Score, Growth Rate, Pre-settle Ø, Settling t50
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                st.metric("Score", f"{kpi.score}/100" if kpi.score is not None else "N/A")
-                pct = kpi.score if kpi.score is not None else 0
-                if pct >= 70:
-                    bar_color = "#059669"
-                elif pct >= 40:
-                    bar_color = "#D97706"
-                else:
-                    bar_color = "#DC2626"
-                st.markdown(
-                    f'<div class="score-bar-track">'
-                    f'<div class="score-bar-fill" style="width:{pct}%;background:{bar_color};"></div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-            c2.metric("Growth Rate", f"{kpi.growth_rate_um_per_min} μm/min" if kpi.growth_rate_um_per_min else "N/A")
-            c3.metric("Pre-settle Ø", f"{kpi.pre_settle_diameter_um} μm" if kpi.pre_settle_diameter_um else "N/A")
-            c4.metric("Settling t50", f"{kpi.t50_min} min" if kpi.t50_min else "N/A")
-
-            c5, c6, c7, c8 = st.columns(4)
-            c5.metric("Rapid Mix", f"{kpi.rapid_mix_duration_min:.1f} min" if kpi.rapid_mix_duration_min else "N/A")
-            c6.metric("Flocculation", f"{kpi.flocculation_duration_min:.1f} min" if kpi.flocculation_duration_min else "N/A")
-            c7.metric("Settling", f"{kpi.settling_duration_min:.1f} min" if kpi.settling_duration_min else "N/A")
-            c8.metric("Plateau CV", f"{kpi.plateau_cv}%" if kpi.plateau_cv else "N/A")
-
-            # Threshold times
-            if thresholds:
-                thr_cols = st.columns(len(thresholds))
-                for tc, thr in zip(thr_cols, thresholds):
-                    val = kpi.time_to_thresholds_min.get(thr)
-                    tc.metric(f"{int(thr)} μm", f"{val} min" if val is not None else "Not reached")
-
-            if kpi.score_reason:
-                st.caption(kpi.score_reason)
-
-    # ── Summary table ──
-    st.markdown("---")
-    st.markdown("#### Run Summary Table")
-    summary_rows = [build_summary_row(r["meta"], r["kpi"]) for r in runs]
-    summary_df = pd.DataFrame(summary_rows)
-    st.dataframe(
-        summary_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "File": st.column_config.TextColumn(width="medium"),
-            "Protocol": st.column_config.TextColumn(width="medium"),
-            "Chemistry": st.column_config.TextColumn(width="small"),
-            "Dosage": st.column_config.TextColumn(width="small"),
-            "Plateau Mean (μm)": st.column_config.NumberColumn(width="small"),
-            "Plateau CV (%)": st.column_config.NumberColumn(width="small"),
-            "Pre-settle Ø (μm)": st.column_config.NumberColumn(width="small"),
-        },
+    # ─── Top-level navigation tabs ────────────────────────────────────────────
+    nav_summary, nav_charts, nav_diagnostics, nav_export = st.tabs(
+        ["Summary", "Charts", "Diagnostics", "Export"]
     )
 
-    # ── Multi-run comparison (if >= 2) ──
-    if len(runs) >= 2:
-        st.markdown("---")
-        st.markdown("#### Run Comparison")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            idx_a = st.selectbox("Run A", range(len(runs)), format_func=lambda i: run_labels[i], key="cmp_a")
-        with col_b:
-            default_b = 1 if len(runs) > 1 else 0
-            idx_b = st.selectbox("Run B", range(len(runs)), format_func=lambda i: run_labels[i], index=default_b, key="cmp_b")
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TAB: Summary
+    # ═══════════════════════════════════════════════════════════════════════════
+    with nav_summary:
 
-        ra, rb = runs[idx_a], runs[idx_b]
-        ka, kb = ra["kpi"], rb["kpi"]
-
-        def _fmt(val, unit=""):
-            if val is None:
-                return "N/A"
-            return f"{val}{unit}"
-
-        def _winner(va, vb, higher_better=True):
-            if va is None or vb is None:
-                return "", ""
-            if higher_better:
-                return ("**✓**" if va > vb else "", "**✓**" if vb > va else "")
-            return ("**✓**" if va < vb else "", "**✓**" if vb < va else "")
-
-        comp_metrics = [
-            ("Score", ka.score, kb.score, "/100", True),
-            ("Growth Rate", ka.growth_rate_um_per_min, kb.growth_rate_um_per_min, " μm/min", True),
-            ("Pre-settle Ø", ka.pre_settle_diameter_um, kb.pre_settle_diameter_um, " μm", True),
-            ("Plateau CV", ka.plateau_cv, kb.plateau_cv, "%", False),
-            ("Settling t50", ka.t50_min, kb.t50_min, " min", False),
-            ("Settling t90", ka.t10_min, kb.t10_min, " min", False),
-        ]
-        for thr in thresholds:
-            va = ka.time_to_thresholds_min.get(thr)
-            vb = kb.time_to_thresholds_min.get(thr)
-            comp_metrics.append((f"t_{int(thr)}μm", va, vb, " min", False))
-
-        comp_rows = []
-        for label, va, vb, unit, hb in comp_metrics:
-            wa, wb = _winner(va, vb, hb)
-            comp_rows.append({
-                "Metric": label,
-                f"Run A ({run_labels[idx_a]})": f"{_fmt(va, unit)} {wa}",
-                f"Run B ({run_labels[idx_b]})": f"{_fmt(vb, unit)} {wb}",
-            })
-        st.table(pd.DataFrame(comp_rows))
-
-        # Natural language summary
-        summaries = []
-        if ka.growth_rate_um_per_min is not None and kb.growth_rate_um_per_min is not None:
-            if ka.growth_rate_um_per_min > kb.growth_rate_um_per_min:
-                summaries.append("Run A forms floc faster")
-            else:
-                summaries.append("Run B forms floc faster")
-        if ka.pre_settle_diameter_um is not None and kb.pre_settle_diameter_um is not None:
-            if ka.pre_settle_diameter_um > kb.pre_settle_diameter_um:
-                summaries.append("Run A achieves higher pre-settle size")
-            else:
-                summaries.append("Run B achieves higher pre-settle size")
-        if ka.t50_min is not None and kb.t50_min is not None:
-            if ka.t50_min < kb.t50_min:
-                summaries.append("Run A settles faster")
-            else:
-                summaries.append("Run B settles faster")
-        if ka.score is not None and kb.score is not None:
-            if ka.score > kb.score:
-                summaries.append(f"overall score favors Run A ({ka.score} vs {kb.score})")
-            elif kb.score > ka.score:
-                summaries.append(f"overall score favors Run B ({kb.score} vs {ka.score})")
-            else:
-                summaries.append("overall scores are tied")
-        if summaries:
-            st.info("; ".join(summaries) + ".")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# TAB: Charts
-# ═══════════════════════════════════════════════════════════════════════════
-with nav_charts:
-
-    # ── Per-run charts ──
-    if len(runs) == 1:
-        run = runs[0]
-        df, meta, phases, kpi = run["df"], run["meta"], run["phases"], run["kpi"]
-        _chart_card_open("Floc Diameter", "Mean particle diameter over the run duration")
-        st.plotly_chart(plot_diameter(df, phases, kpi, meta.short_label, thresholds), use_container_width=True)
-        _chart_card_close()
-        if "vol_conc_mm3_L" in df.columns:
-            _chart_card_open("Volume Concentration", "Particle volume concentration over time")
-            st.plotly_chart(plot_vol_conc(df, phases, kpi, meta.short_label), use_container_width=True)
-            _chart_card_close()
-    else:
-        chart_run_tabs = st.tabs(run_labels + ["Overlay"])
-
-        for tab, run in zip(chart_run_tabs[:-1], runs):
-            df, meta, phases, kpi = run["df"], run["meta"], run["phases"], run["kpi"]
-            with tab:
-                _chart_card_open("Floc Diameter", "Mean particle diameter over the run duration")
-                st.plotly_chart(plot_diameter(df, phases, kpi, meta.short_label, thresholds), use_container_width=True)
-                _chart_card_close()
-                if "vol_conc_mm3_L" in df.columns:
-                    _chart_card_open("Volume Concentration", "Particle volume concentration over time")
-                    st.plotly_chart(plot_vol_conc(df, phases, kpi, meta.short_label), use_container_width=True)
-                    _chart_card_close()
-
-        # Overlay tab
-        with chart_run_tabs[-1]:
-            _chart_card_open("Overlay: Diameter", "All runs compared on a single axis")
-            fig_cmp = go.Figure()
-            colors = ["#0284C7", "#E11D48", "#059669", "#D97706", "#7C3AED", "#DB2777"]
-            for i, run in enumerate(runs):
-                color = colors[i % len(colors)]
-                fig_cmp.add_trace(go.Scatter(
-                    x=run["df"]["time_min"], y=run["df"].get("diameter_um"),
-                    mode="lines+markers", marker=dict(size=3, color=color),
-                    name=chart_labels[i],
-                ))
-            add_phase_shading(fig_cmp, runs[0]["phases"])
-            fig_cmp.update_layout(
-                xaxis_title="Time (min)", yaxis_title="Mean Diameter (μm)",
-                **CHART_LAYOUT,
+        with st.expander("How to read this page", expanded=False):
+            st.markdown(
+                "Each uploaded run is shown as a card with key performance metrics. "
+                "Hover over any metric's **?** icon for a quick explanation.\n\n"
+                "| Metric | What it tells you | Good value |\n"
+                "|:--|:--|:--|\n"
+                f"| **Score** | {METRIC_HELP['score']['short']} | {METRIC_HELP['score']['good']} |\n"
+                f"| **Growth Rate** | {METRIC_HELP['growth_rate']['short']} | {METRIC_HELP['growth_rate']['good']} |\n"
+                f"| **Pre-settle Ø** | {METRIC_HELP['pre_settle_diameter']['short']} | {METRIC_HELP['pre_settle_diameter']['good']} |\n"
+                f"| **Settling t50** | {METRIC_HELP['settling_t50']['short']} | {METRIC_HELP['settling_t50']['good']} |\n"
+                f"| **Plateau CV** | {METRIC_HELP['plateau_cv']['short']} | {METRIC_HELP['plateau_cv']['good']} |\n"
+                f"| **Threshold times** | {METRIC_HELP['time_to_threshold']['short']} | {METRIC_HELP['time_to_threshold']['good']} |\n"
             )
-            st.plotly_chart(fig_cmp, use_container_width=True)
-            _chart_card_close()
 
-            # Vol conc overlay
-            vol_runs = [r for r in runs if "vol_conc_mm3_L" in r["df"].columns]
-            if len(vol_runs) >= 2:
-                _chart_card_open("Overlay: Vol. Concentration", "Volume concentration comparison across runs")
-                fig_vc = go.Figure()
-                for i, run in enumerate(vol_runs):
+        # Best run ranking
+        if scored_runs:
+            best_run = runs[best_idx]
+            st.success(
+                f"**Best run:** {best_run['meta'].label} — Score **{best_run['kpi'].score}**/100"
+            )
+
+        # ── Per-run KPI cards ──
+        for run_idx, run in enumerate(runs):
+            kpi = run["kpi"]
+            meta = run["meta"]
+
+            with st.container(border=True):
+                st.markdown(f"#### {meta.label}")
+
+                # Row 1: Score, Growth Rate, Pre-settle Ø, Settling t50
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    st.metric("Score", f"{kpi.score}/100" if kpi.score is not None else "N/A",
+                               help=METRIC_HELP["score"]["short"])
+                    pct = kpi.score if kpi.score is not None else 0
+                    if pct >= 70:
+                        bar_color = "#059669"
+                    elif pct >= 40:
+                        bar_color = "#D97706"
+                    else:
+                        bar_color = "#DC2626"
+                    st.markdown(
+                        f'<div class="score-bar-track">'
+                        f'<div class="score-bar-fill" style="width:{pct}%;background:{bar_color};"></div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                c2.metric("Growth Rate", f"{kpi.growth_rate_um_per_min} μm/min" if kpi.growth_rate_um_per_min else "N/A",
+                           help=METRIC_HELP["growth_rate"]["short"])
+                c3.metric("Pre-settle Ø", f"{kpi.pre_settle_diameter_um} μm" if kpi.pre_settle_diameter_um else "N/A",
+                           help=METRIC_HELP["pre_settle_diameter"]["short"])
+                c4.metric("Settling t50", f"{kpi.t50_min} min" if kpi.t50_min else "N/A",
+                           help=METRIC_HELP["settling_t50"]["short"])
+
+                c5, c6, c7, c8 = st.columns(4)
+                c5.metric("Rapid Mix", f"{kpi.rapid_mix_duration_min:.1f} min" if kpi.rapid_mix_duration_min else "N/A",
+                           help=METRIC_HELP["rapid_mix_duration"]["short"])
+                c6.metric("Flocculation", f"{kpi.flocculation_duration_min:.1f} min" if kpi.flocculation_duration_min else "N/A",
+                           help=METRIC_HELP["flocculation_duration"]["short"])
+                c7.metric("Settling", f"{kpi.settling_duration_min:.1f} min" if kpi.settling_duration_min else "N/A",
+                           help=METRIC_HELP["settling_duration"]["short"])
+                c8.metric("Plateau CV", f"{kpi.plateau_cv}%" if kpi.plateau_cv else "N/A",
+                           help=METRIC_HELP["plateau_cv"]["short"])
+
+                # Threshold times
+                if thresholds:
+                    thr_cols = st.columns(len(thresholds))
+                    for tc, thr in zip(thr_cols, thresholds):
+                        val = kpi.time_to_thresholds_min.get(thr)
+                        tc.metric(f"{int(thr)} μm", f"{val} min" if val is not None else "Not reached",
+                                  help=METRIC_HELP["time_to_threshold"]["short"])
+
+                if kpi.score_reason:
+                    st.caption(kpi.score_reason)
+
+        # ── Summary table ──
+        st.markdown("---")
+        st.markdown("#### Run Summary Table")
+        summary_rows = [build_summary_row(r["meta"], r["kpi"]) for r in runs]
+        summary_df = pd.DataFrame(summary_rows)
+        st.dataframe(
+            summary_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "File": st.column_config.TextColumn(width="medium"),
+                "Protocol": st.column_config.TextColumn(width="medium"),
+                "Chemistry": st.column_config.TextColumn(width="small"),
+                "Dosage": st.column_config.TextColumn(width="small"),
+                "Plateau Mean (μm)": st.column_config.NumberColumn(width="small"),
+                "Plateau CV (%)": st.column_config.NumberColumn(width="small"),
+                "Pre-settle Ø (μm)": st.column_config.NumberColumn(width="small"),
+            },
+        )
+
+        # ── Multi-run comparison (if >= 2) ──
+        if len(runs) >= 2:
+            st.markdown("---")
+            st.markdown("#### Run Comparison")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                idx_a = st.selectbox("Run A", range(len(runs)), format_func=lambda i: run_labels[i], key="cmp_a")
+            with col_b:
+                default_b = 1 if len(runs) > 1 else 0
+                idx_b = st.selectbox("Run B", range(len(runs)), format_func=lambda i: run_labels[i], index=default_b, key="cmp_b")
+
+            ra, rb = runs[idx_a], runs[idx_b]
+            ka, kb = ra["kpi"], rb["kpi"]
+
+            def _fmt(val, unit=""):
+                if val is None:
+                    return "N/A"
+                return f"{val}{unit}"
+
+            def _winner(va, vb, higher_better=True):
+                if va is None or vb is None:
+                    return "", ""
+                if higher_better:
+                    return ("**✓**" if va > vb else "", "**✓**" if vb > va else "")
+                return ("**✓**" if va < vb else "", "**✓**" if vb < va else "")
+
+            comp_metrics = [
+                ("Score", ka.score, kb.score, "/100", True),
+                ("Growth Rate", ka.growth_rate_um_per_min, kb.growth_rate_um_per_min, " μm/min", True),
+                ("Pre-settle Ø", ka.pre_settle_diameter_um, kb.pre_settle_diameter_um, " μm", True),
+                ("Plateau CV", ka.plateau_cv, kb.plateau_cv, "%", False),
+                ("Settling t50", ka.t50_min, kb.t50_min, " min", False),
+                ("Settling t90", ka.t10_min, kb.t10_min, " min", False),
+            ]
+            for thr in thresholds:
+                va = ka.time_to_thresholds_min.get(thr)
+                vb = kb.time_to_thresholds_min.get(thr)
+                comp_metrics.append((f"t_{int(thr)}μm", va, vb, " min", False))
+
+            comp_rows = []
+            for label, va, vb, unit, hb in comp_metrics:
+                wa, wb = _winner(va, vb, hb)
+                comp_rows.append({
+                    "Metric": label,
+                    f"Run A ({run_labels[idx_a]})": f"{_fmt(va, unit)} {wa}",
+                    f"Run B ({run_labels[idx_b]})": f"{_fmt(vb, unit)} {wb}",
+                })
+            st.table(pd.DataFrame(comp_rows))
+
+            # Natural language summary
+            summaries = []
+            if ka.growth_rate_um_per_min is not None and kb.growth_rate_um_per_min is not None:
+                if ka.growth_rate_um_per_min > kb.growth_rate_um_per_min:
+                    summaries.append("Run A forms floc faster")
+                else:
+                    summaries.append("Run B forms floc faster")
+            if ka.pre_settle_diameter_um is not None and kb.pre_settle_diameter_um is not None:
+                if ka.pre_settle_diameter_um > kb.pre_settle_diameter_um:
+                    summaries.append("Run A achieves higher pre-settle size")
+                else:
+                    summaries.append("Run B achieves higher pre-settle size")
+            if ka.t50_min is not None and kb.t50_min is not None:
+                if ka.t50_min < kb.t50_min:
+                    summaries.append("Run A settles faster")
+                else:
+                    summaries.append("Run B settles faster")
+            if ka.score is not None and kb.score is not None:
+                if ka.score > kb.score:
+                    summaries.append(f"overall score favors Run A ({ka.score} vs {kb.score})")
+                elif kb.score > ka.score:
+                    summaries.append(f"overall score favors Run B ({kb.score} vs {ka.score})")
+                else:
+                    summaries.append("overall scores are tied")
+            if summaries:
+                st.info("; ".join(summaries) + ".")
+
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TAB: Charts
+    # ═══════════════════════════════════════════════════════════════════════════
+    with nav_charts:
+
+        # ── Per-run charts ──
+        if len(runs) == 1:
+            run = runs[0]
+            df, meta, phases, kpi = run["df"], run["meta"], run["phases"], run["kpi"]
+            _chart_card_open("Floc Diameter", "Mean particle diameter over the run duration")
+            st.plotly_chart(plot_diameter(df, phases, kpi, meta.short_label, thresholds), use_container_width=True)
+            _chart_card_close()
+            if "vol_conc_mm3_L" in df.columns:
+                _chart_card_open("Volume Concentration", "Particle volume concentration over time")
+                st.plotly_chart(plot_vol_conc(df, phases, kpi, meta.short_label), use_container_width=True)
+                _chart_card_close()
+        else:
+            chart_run_tabs = st.tabs(run_labels + ["Overlay"])
+
+            for tab, run in zip(chart_run_tabs[:-1], runs):
+                df, meta, phases, kpi = run["df"], run["meta"], run["phases"], run["kpi"]
+                with tab:
+                    _chart_card_open("Floc Diameter", "Mean particle diameter over the run duration")
+                    st.plotly_chart(plot_diameter(df, phases, kpi, meta.short_label, thresholds), use_container_width=True)
+                    _chart_card_close()
+                    if "vol_conc_mm3_L" in df.columns:
+                        _chart_card_open("Volume Concentration", "Particle volume concentration over time")
+                        st.plotly_chart(plot_vol_conc(df, phases, kpi, meta.short_label), use_container_width=True)
+                        _chart_card_close()
+
+            # Overlay tab
+            with chart_run_tabs[-1]:
+                _chart_card_open("Overlay: Diameter", "All runs compared on a single axis")
+                fig_cmp = go.Figure()
+                colors = ["#0284C7", "#E11D48", "#059669", "#D97706", "#7C3AED", "#DB2777"]
+                for i, run in enumerate(runs):
                     color = colors[i % len(colors)]
-                    fig_vc.add_trace(go.Scatter(
-                        x=run["df"]["time_min"], y=run["df"]["vol_conc_mm3_L"],
+                    fig_cmp.add_trace(go.Scatter(
+                        x=run["df"]["time_min"], y=run["df"].get("diameter_um"),
                         mode="lines+markers", marker=dict(size=3, color=color),
-                        name=run["meta"].short_label,
+                        name=chart_labels[i],
                     ))
-                add_phase_shading(fig_vc, vol_runs[0]["phases"])
-                fig_vc.update_layout(
-                    xaxis_title="Time (min)", yaxis_title="Vol. Concentration (mm³/L)",
+                add_phase_shading(fig_cmp, runs[0]["phases"])
+                fig_cmp.update_layout(
+                    xaxis_title="Time (min)", yaxis_title="Mean Diameter (μm)",
                     **CHART_LAYOUT,
                 )
-                st.plotly_chart(fig_vc, use_container_width=True)
+                st.plotly_chart(fig_cmp, use_container_width=True)
                 _chart_card_close()
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# TAB: Diagnostics
-# ═══════════════════════════════════════════════════════════════════════════
-with nav_diagnostics:
-
-    for run in runs:
-        df, meta, phases, kpi = run["df"], run["meta"], run["phases"], run["kpi"]
-
-        with st.container(border=True):
-            st.markdown(f"#### {meta.label}")
-
-            # Quality flags
-            if kpi.quality_flags:
-                for flag in kpi.quality_flags:
-                    st.warning(flag)
-            else:
-                st.caption("No data quality issues detected.")
-
-            # Floc count chart
-            fc_fig = plot_floc_count(df, phases, meta.short_label)
-            if fc_fig:
-                _chart_card_open("Floc Count", "Particle count per mL — useful for detecting low-count artifacts")
-                st.plotly_chart(fc_fig, use_container_width=True)
-                _chart_card_close()
-
-            # Metadata
-            with st.expander("Metadata"):
-                md_rows = [
-                    ("File", meta.filename),
-                    ("Generated", meta.generated_timestamp or "—"),
-                    ("Protocol", meta.protocol_title or "—"),
-                    ("Chemistry", meta.run_chemistry or "—"),
-                    ("Dosage", meta.run_dosage or "—"),
-                    ("Comments", meta.comments or "—"),
-                ]
-                md_table = "| Field | Value |\n|:--|:--|\n"
-                md_table += "\n".join(f"| {k} | {v} |" for k, v in md_rows)
-                st.markdown(md_table)
-                if meta.warnings:
-                    st.caption("**Warnings:** " + "; ".join(meta.warnings))
+                # Vol conc overlay
+                vol_runs = [r for r in runs if "vol_conc_mm3_L" in r["df"].columns]
+                if len(vol_runs) >= 2:
+                    _chart_card_open("Overlay: Vol. Concentration", "Volume concentration comparison across runs")
+                    fig_vc = go.Figure()
+                    for i, run in enumerate(vol_runs):
+                        color = colors[i % len(colors)]
+                        fig_vc.add_trace(go.Scatter(
+                            x=run["df"]["time_min"], y=run["df"]["vol_conc_mm3_L"],
+                            mode="lines+markers", marker=dict(size=3, color=color),
+                            name=run["meta"].short_label,
+                        ))
+                    add_phase_shading(fig_vc, vol_runs[0]["phases"])
+                    fig_vc.update_layout(
+                        xaxis_title="Time (min)", yaxis_title="Vol. Concentration (mm³/L)",
+                        **CHART_LAYOUT,
+                    )
+                    st.plotly_chart(fig_vc, use_container_width=True)
+                    _chart_card_close()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# TAB: Export
-# ═══════════════════════════════════════════════════════════════════════════
-with nav_export:
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TAB: Diagnostics
+    # ═══════════════════════════════════════════════════════════════════════════
+    with nav_diagnostics:
 
-    st.markdown("#### Download Results")
-    st.caption("Export the summary table or full KPI data for reporting.")
+        for run in runs:
+            df, meta, phases, kpi = run["df"], run["meta"], run["phases"], run["kpi"]
 
-    col_csv, col_json, col_pdf = st.columns(3)
+            with st.container(border=True):
+                st.markdown(f"#### {meta.label}")
 
-    with col_csv:
-        csv_buf = summary_df.to_csv(index=False)
-        st.download_button(
-            "Download summary_table.csv",
-            csv_buf,
-            file_name="summary_table.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
+                # Classify flags by severity
+                if kpi.quality_flags:
+                    classified = [classify_flag(f) for f in kpi.quality_flags]
 
-    with col_json:
-        all_kpis = [kpi_to_dict(r["meta"], r["kpi"]) for r in runs]
-        json_buf = json.dumps(all_kpis, indent=2, default=str)
-        st.download_button(
-            "Download all_runs.json",
-            json_buf,
-            file_name="all_runs.json",
-            mime="application/json",
-            use_container_width=True,
-        )
+                    # Group by severity
+                    severity_order = ["warning", "caution", "info"]
+                    severity_labels = {"warning": "Warning", "caution": "Caution", "info": "Info"}
+                    severity_st = {"warning": st.error, "caution": st.warning, "info": st.info}
 
-    with col_pdf:
-        try:
-            pdf_bytes = generate_pdf(runs, thresholds)
-        except Exception as e:
-            pdf_bytes = None
-            st.warning(f"PDF generation failed: {e}")
-        if pdf_bytes:
+                    for sev in severity_order:
+                        items = [c for c in classified if c["severity"] == sev]
+                        if not items:
+                            continue
+                        for item in items:
+                            severity_st[sev](
+                                f"{item['icon']} **{severity_labels[sev]}:** {item['summary']}"
+                            )
+                            st.caption(f"**What to do:** {item['action']}")
+                else:
+                    st.success("No data quality issues detected — all checks passed.")
+
+                # Floc count chart
+                fc_fig = plot_floc_count(df, phases, meta.short_label)
+                if fc_fig:
+                    _chart_card_open("Floc Count", "Particle count per mL — useful for detecting low-count artifacts")
+                    st.plotly_chart(fc_fig, use_container_width=True)
+                    _chart_card_close()
+
+                # Metadata
+                with st.expander("Metadata"):
+                    md_rows = [
+                        ("File", meta.filename),
+                        ("Generated", meta.generated_timestamp or "—"),
+                        ("Protocol", meta.protocol_title or "—"),
+                        ("Chemistry", meta.run_chemistry or "—"),
+                        ("Dosage", meta.run_dosage or "—"),
+                        ("Comments", meta.comments or "—"),
+                    ]
+                    md_table = "| Field | Value |\n|:--|:--|\n"
+                    md_table += "\n".join(f"| {k} | {v} |" for k, v in md_rows)
+                    st.markdown(md_table)
+                    if meta.warnings:
+                        st.caption("**Warnings:** " + "; ".join(meta.warnings))
+
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TAB: Export
+    # ═══════════════════════════════════════════════════════════════════════════
+    with nav_export:
+
+        st.markdown("#### Download Results")
+        st.caption("Export the summary table or full KPI data for reporting.")
+
+        col_csv, col_json, col_pdf = st.columns(3)
+
+        with col_csv:
+            csv_buf = summary_df.to_csv(index=False)
             st.download_button(
-                "Download report.pdf",
-                pdf_bytes,
-                file_name="report.pdf",
-                mime="application/pdf",
+                "Download summary_table.csv",
+                csv_buf,
+                file_name="summary_table.csv",
+                mime="text/csv",
                 use_container_width=True,
             )
+
+        with col_json:
+            all_kpis = [kpi_to_dict(r["meta"], r["kpi"]) for r in runs]
+            json_buf = json.dumps(all_kpis, indent=2, default=str)
+            st.download_button(
+                "Download all_runs.json",
+                json_buf,
+                file_name="all_runs.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+
+        with col_pdf:
+            try:
+                pdf_bytes = generate_pdf(runs, thresholds)
+            except Exception as e:
+                pdf_bytes = None
+                st.warning(f"PDF generation failed: {e}")
+            if pdf_bytes:
+                st.download_button(
+                    "Download report.pdf",
+                    pdf_bytes,
+                    file_name="report.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
