@@ -775,9 +775,9 @@ def _pdf_add_run(pdf, run, thresholds_to_show, chart_w=190):
 
     kpi_rows = [
         ("Score", f"{kpi.score}/100" if kpi.score is not None else "N/A"),
-        ("Growth Rate", f"{kpi.growth_rate_um_per_min} um/min" if kpi.growth_rate_um_per_min else "N/A"),
-        ("Pre-settle O", f"{kpi.pre_settle_diameter_um} um" if kpi.pre_settle_diameter_um else "N/A"),
-        ("Plateau Mean", f"{kpi.plateau_mean_um} um" if kpi.plateau_mean_um else "N/A"),
+        ("Growth Rate", f"{kpi.growth_rate_um_per_min} \u00b5m/min" if kpi.growth_rate_um_per_min else "N/A"),
+        ("Pre-settle O", f"{kpi.pre_settle_diameter_um} \u00b5m" if kpi.pre_settle_diameter_um else "N/A"),
+        ("Plateau Mean", f"{kpi.plateau_mean_um} \u00b5m" if kpi.plateau_mean_um else "N/A"),
         ("Plateau CV", f"{kpi.plateau_cv}%" if kpi.plateau_cv else "N/A"),
         ("Settling t50", f"{kpi.t50_min} min" if kpi.t50_min else "N/A"),
         ("Settling t10", f"{kpi.t10_min} min" if kpi.t10_min else "N/A"),
@@ -788,7 +788,7 @@ def _pdf_add_run(pdf, run, thresholds_to_show, chart_w=190):
     # Add threshold times
     for thr in sorted(thresholds_to_show):
         val = kpi.time_to_thresholds_min.get(thr)
-        kpi_rows.append((f"t {int(thr)} um", f"{val} min" if val is not None else "Not reached"))
+        kpi_rows.append((f"t {int(thr)} \u00b5m", f"{val} min" if val is not None else "Not reached"))
 
     pdf.set_font("Helvetica", "", 9)
     col_w = 45
