@@ -178,7 +178,7 @@ st.markdown("""
         color: #526580 !important;
         font-size: 0.72rem;
         letter-spacing: 0.06em;
-        text-transform: uppercase;
+        text-transform: none;
         font-weight: 500;
     }
     div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
