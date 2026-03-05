@@ -1046,15 +1046,6 @@ with root.container():
                         tc.metric(f"{int(thr)} μm", f"{val} min" if val is not None else "Not reached",
                                   help=METRIC_HELP["time_to_threshold"]["short"])
 
-                    # Temporary debug caption for threshold logic verification
-                    dbg = getattr(kpi, "threshold_debug", None)
-                    if dbg:
-                        st.caption(
-                            f"🔍 Threshold debug — d0: {dbg.get('d0')} µm | "
-                            f"min: {dbg.get('d_min')} µm | max: {dbg.get('d_max')} µm | "
-                            f"valid pts: {dbg.get('n_valid')} | "
-                            f"thresholds: {dbg.get('thresholds')}"
-                        )
 
                 if kpi.score_reason:
                     st.caption(kpi.score_reason)
