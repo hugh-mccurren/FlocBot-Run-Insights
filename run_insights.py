@@ -44,7 +44,6 @@ def _load_heavy_deps():
         DEFAULT_WEIGHTS as _DEFAULT_WEIGHTS,
         phase_by_name as _phase_by_name,
     )
-    from ui_operator import show_operator_mode as _show_operator_mode
     return {
         "pd": _pd,
         "np": _np,
@@ -60,7 +59,6 @@ def _load_heavy_deps():
         "RunKPIs": _RunKPIs,
         "DEFAULT_WEIGHTS": _DEFAULT_WEIGHTS,
         "phase_by_name": _phase_by_name,
-        "show_operator_mode": _show_operator_mode,
     }
 
 
@@ -512,7 +510,7 @@ if not runs:
 # ═══════════════════════════════════════════════════════════════════════════
 
 if app_mode == "Operator (Simple)":
-    show_operator_mode = D["show_operator_mode"]
+    from ui_operator import show_operator_mode
     show_operator_mode(
         st, runs, go,
         phase_colors=PHASE_COLORS,

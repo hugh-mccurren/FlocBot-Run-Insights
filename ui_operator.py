@@ -409,9 +409,10 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
             + '</div>',
             unsafe_allow_html=True,
         )
-        if st.button("Show advanced comparison details \u2192", key="op_switch_advanced"):
+        def _go_advanced():
             st.session_state["_switch_to_advanced"] = True
-            st.rerun()
+        st.button("Show advanced comparison details \u2192",
+                  key="op_switch_advanced", on_click=_go_advanced)
 
     # Show details for the best/only run
     if len(runs) >= 2:
