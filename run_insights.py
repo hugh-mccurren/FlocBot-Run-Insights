@@ -351,6 +351,10 @@ with st.sidebar:
     st.markdown("---")
 
     # ── Mode selector ──
+    # Handle pending mode-switch request (from Operator Mode button)
+    if st.session_state.get("_switch_to_advanced"):
+        st.session_state["app_mode"] = "Advanced (Full)"
+        del st.session_state["_switch_to_advanced"]
     if "app_mode" not in st.session_state:
         st.session_state["app_mode"] = "Operator (Simple)"
     app_mode = st.radio(

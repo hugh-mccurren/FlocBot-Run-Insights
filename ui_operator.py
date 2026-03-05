@@ -410,7 +410,7 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
             unsafe_allow_html=True,
         )
         if st.button("Show advanced comparison details \u2192", key="op_switch_advanced"):
-            st.session_state["app_mode"] = "Advanced (Full)"
+            st.session_state["_switch_to_advanced"] = True
             st.rerun()
 
     # Show details for the best/only run
