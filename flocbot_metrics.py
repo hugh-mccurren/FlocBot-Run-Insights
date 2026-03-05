@@ -128,6 +128,9 @@ class RunKPIs:
 
     quality_flags: list = field(default_factory=list)
 
+    # Temporary debug info for threshold milestone logic
+    threshold_debug: Optional[dict] = None
+
 
 def compute_kpis(
     df: pd.DataFrame,
@@ -168,11 +171,31 @@ def compute_kpis(
 
     # --- Time-to-thresholds ---
     if has_diameter:
-        t = df["time_min"].values
-        d = df["diameter_um"].values
+        t_raw = df["time_min"].values
+        d_raw = df["diameter_um"].values
+        # Filter to rows where diameter is not NaN — this is the series
+        # used for milestone searching (same filtering for d0 and interp)
+        valid = ~np.isnan(d_raw)
+        t = t_raw[valid]
+        d = d_raw[valid]
+        d0 = d[0] if len(d) > 0 else None
+
+        # Debug info for verifying logic
+        kpi.threshold_debug = {
+            "d0": round(float(d0), 2) if d0 is not None else None,
+            "d_min": round(float(np.nanmin(d)), 2) if len(d) > 0 else None,
+            "d_max": round(float(np.nanmax(d)), 2) if len(d) > 0 else None,
+            "n_valid": int(valid.sum()),
+            "thresholds": [float(thr) for thr in thresholds],
+        }
+
         for thr in thresholds:
-            tt = _interp_time_to_value(t, d, thr, "rising")
-            kpi.time_to_thresholds_min[thr] = round(tt, 2) if tt is not None else None
+            if d0 is not None and d0 >= thr:
+                # First valid diameter already at/above threshold → 0.0 min
+                kpi.time_to_thresholds_min[thr] = 0.0
+            else:
+                tt = _interp_time_to_value(t, d, thr, "rising")
+                kpi.time_to_thresholds_min[thr] = round(tt, 2) if tt is not None else None
 
     # --- Pre-settle diameter (last 60 s before settling) ---
     if has_diameter and se:

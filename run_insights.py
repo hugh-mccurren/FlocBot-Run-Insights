@@ -30,6 +30,7 @@ st.markdown("<!-- APP_READY_FLOCBOT -->", unsafe_allow_html=True)
 @st.cache_resource(show_spinner=False)
 def _load_heavy_deps():
     """Import heavy libraries once and cache across reruns."""
+    _CACHE_VERSION = 2  # bump to invalidate st.cache_resource after dep changes
     import pandas as _pd
     import numpy as _np
     import plotly.graph_objects as _go
@@ -411,10 +412,16 @@ with st.sidebar:
         )
         st.caption("Comma-separated values in μm.")
         try:
-            thresholds = [float(t.strip()) for t in threshold_str.split(",") if t.strip()]
+            thresholds = sorted(set(
+                float(t.strip()) for t in threshold_str.split(",") if t.strip()
+            ))
         except ValueError:
             thresholds = [250, 300, 350, 400, 450]
             st.warning("Invalid thresholds – using defaults.")
+
+        if len(thresholds) > 5:
+            thresholds = thresholds[:5]
+            st.caption("Showing first 5 thresholds (to keep the dashboard readable).")
 
         st.markdown("---")
 
@@ -530,6 +537,17 @@ for p in parsed:
 
 for fname, err in errors:
     st.error(f"**{fname}:** {err}")
+
+# Show import info for successfully parsed runs (multi-sheet, fallback, etc.)
+for r in runs:
+    meta = r["meta"]
+    dbg = getattr(meta, "import_debug", None)
+    if dbg and len(dbg.get("sheets_found", [])) > 1:
+        st.info(
+            f"📋 **{meta.filename}** — multi-sheet workbook detected. "
+            f"Using sheet **'{dbg['chosen_sheet']}'** "
+            f"(sheets found: {', '.join(dbg['sheets_found'])})."
+        )
 
 if not runs:
     st.warning("No valid runs were parsed.")
@@ -1021,11 +1039,22 @@ with root.container():
                         '<p class="metrics-row-desc">Time to reach key floc sizes</p>',
                         unsafe_allow_html=True,
                     )
-                    thr_cols = st.columns(len(thresholds))
-                    for tc, thr in zip(thr_cols, thresholds):
+                    thr_display = thresholds[:5]
+                    thr_cols = st.columns(len(thr_display))
+                    for tc, thr in zip(thr_cols, thr_display):
                         val = kpi.time_to_thresholds_min.get(thr)
                         tc.metric(f"{int(thr)} μm", f"{val} min" if val is not None else "Not reached",
                                   help=METRIC_HELP["time_to_threshold"]["short"])
+
+                    # Temporary debug caption for threshold logic verification
+                    dbg = getattr(kpi, "threshold_debug", None)
+                    if dbg:
+                        st.caption(
+                            f"🔍 Threshold debug — d0: {dbg.get('d0')} µm | "
+                            f"min: {dbg.get('d_min')} µm | max: {dbg.get('d_max')} µm | "
+                            f"valid pts: {dbg.get('n_valid')} | "
+                            f"thresholds: {dbg.get('thresholds')}"
+                        )
 
                 if kpi.score_reason:
                     st.caption(kpi.score_reason)
@@ -1252,6 +1281,24 @@ with root.container():
                     st.markdown(md_table)
                     if meta.warnings:
                         st.caption("**Warnings:** " + "; ".join(meta.warnings))
+
+                    # Import debug — sheet selection details (collapsible)
+                    dbg = getattr(meta, "import_debug", None)
+                    if dbg:
+                        with st.expander("Import details", expanded=False):
+                            st.caption(f"Engine: `{dbg.get('engine', '?')}`")
+                            st.caption(f"Sheets found: {dbg.get('sheets_found', [])}")
+                            st.caption(f"Chosen sheet: `{dbg.get('chosen_sheet', '?')}`")
+                            scores = dbg.get("sheet_scores", {})
+                            for sn, info in scores.items():
+                                marker = "✅" if info.get("valid") else "❌"
+                                st.caption(
+                                    f"{marker} **{sn}** — "
+                                    f"required: {info.get('required_matched', [])} | "
+                                    f"missing: {info.get('missing_required', [])} | "
+                                    f"desired: {len(info.get('desired_matched', []))} cols | "
+                                    f"numeric rows: {info.get('numeric_rows', 0)}"
+                                )
 
 
     # ═══════════════════════════════════════════════════════════════════════════
