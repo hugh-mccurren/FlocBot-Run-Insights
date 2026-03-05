@@ -19,7 +19,7 @@ OPERATOR_METRICS = {
         "display_name": "Mean Floc Diameter",
         "column": "diameter_um",
         "y_axis_label": "Mean Diameter (\u00b5m)",
-        "chart_title": "Mean Floc Diameter vs Time",
+        "chart_title": "Floc Growth Over Time",
         "tooltip_template": "Time: %{x:.1f} min<br>Diameter: %{y:.0f} \u00b5m<extra></extra>",
         "legend_label_suffix": "",
     },
@@ -27,13 +27,19 @@ OPERATOR_METRICS = {
         "display_name": "Volume Concentration",
         "column": "vol_conc_mm3_L",
         "y_axis_label": "Vol. Concentration (mm\u00b3/L)",
-        "chart_title": "Volume Concentration vs Time",
+        "chart_title": "Floc Concentration Over Time",
         "tooltip_template": "Time: %{x:.1f} min<br>Vol. Conc: %{y:.1f} mm\u00b3/L<extra></extra>",
         "legend_label_suffix": "",
     },
 }
 
 _DEFAULT_METRIC = "diameter"
+
+_PHASE_SUBTITLES = {
+    "rapid_mix": "disperse coagulant",
+    "flocculation": "grow flocs",
+    "settling": "clarify water",
+}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -222,13 +228,13 @@ def compare_runs(runs: list[dict]) -> dict:
 
     bullets = []
     if best_kpi.score is not None:
-        bullets.append(f"Highest overall score: {best_kpi.score}/100")
+        bullets.append(f"Score: {best_kpi.score}/100")
     if best_kpi.pre_settle_diameter_um is not None:
-        bullets.append(f"Largest pre-settle flocs: {best_kpi.pre_settle_diameter_um:.0f} \u00b5m")
+        bullets.append(f"Pre-settle size: {best_kpi.pre_settle_diameter_um:.0f} \u00b5m")
     if best_kpi.t50_min is not None:
-        bullets.append(f"Settling t50: {best_kpi.t50_min:.1f} min")
+        bullets.append(f"Settling (t50): {best_kpi.t50_min:.1f} min")
     elif best_kpi.growth_rate_um_per_min is not None:
-        bullets.append(f"Growth rate: {best_kpi.growth_rate_um_per_min:.0f} \u00b5m/min")
+        bullets.append(f"Growth: {best_kpi.growth_rate_um_per_min:.0f} \u00b5m/min")
 
     return {
         "best_idx": best_i,
@@ -266,14 +272,23 @@ def plot_metric_simple(df, phases, meta_label, go, phase_colors, phase_labels,
             fillcolor=phase_colors.get(p.name, "rgba(200,200,200,0.1)"),
             layer="below", line_width=0,
         )
+        mid_x = (p.start_min + p.end_min) / 2
         fig.add_annotation(
-            x=(p.start_min + p.end_min) / 2,
-            y=1.01, yref="paper",
+            x=mid_x, y=1.02, yref="paper",
             xanchor="center", yanchor="bottom",
             text=phase_labels.get(p.name, p.name),
             showarrow=False,
             font=dict(size=10, color="gray"),
         )
+        subtitle = _PHASE_SUBTITLES.get(p.name)
+        if subtitle:
+            fig.add_annotation(
+                x=mid_x, y=0.98, yref="paper",
+                xanchor="center", yanchor="top",
+                text=subtitle,
+                showarrow=False,
+                font=dict(size=8, color="#8C9BB0"),
+            )
 
     # Settling start line
     se = phase_by_name(phases, "settling")
@@ -330,7 +345,7 @@ OPERATOR_CSS = """
     .op-result-status {
         font-size: 1.5rem;
         font-weight: 700;
-        color: #1B2A3D;
+        color: #0F1D2E;
         margin-bottom: 4px;
     }
     .op-result-msg {
@@ -375,7 +390,7 @@ OPERATOR_CSS = """
         padding: 18px 16px;
         box-shadow: 0 1px 3px rgba(27,42,61,0.06);
         text-align: center;
-        height: 100%;
+        min-height: 200px;
     }
     .op-stage-icon { font-size: 2rem; margin-bottom: 2px; }
     .op-stage-name {
@@ -389,13 +404,19 @@ OPERATOR_CSS = """
     .op-stage-value {
         font-size: 1.3rem;
         font-weight: 700;
-        color: #1B2A3D;
+        color: #0F1D2E;
         margin-bottom: 4px;
     }
     .op-stage-msg {
         font-size: 0.78rem;
         color: #526580;
         margin: 0;
+    }
+    .op-stage-hint {
+        font-size: 0.68rem;
+        color: #8C9BB0;
+        font-style: italic;
+        margin: 6px 0 0 0;
     }
 
     .op-compare-card {
@@ -417,8 +438,25 @@ OPERATOR_CSS = """
     .op-compare-best {
         font-size: 1.15rem;
         font-weight: 700;
-        color: #1B2A3D;
+        color: #0F1D2E;
         margin-bottom: 8px;
+    }
+
+    /* Secondary button style for "View advanced comparison" */
+    .op-compare-panel + div button {
+        background: transparent !important;
+        border: 1px solid #CBD5E1 !important;
+        color: #526580 !important;
+        font-size: 0.82rem !important;
+        font-weight: 500 !important;
+        border-radius: 8px !important;
+        padding: 6px 16px !important;
+        box-shadow: none !important;
+    }
+    .op-compare-panel + div button:hover {
+        background: #F1F5F9 !important;
+        border-color: #94A3B8 !important;
+        color: #334155 !important;
     }
 </style>
 """
@@ -440,16 +478,17 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
     if len(runs) >= 2:
         cmp = compare_runs(runs)
         st.markdown(
+            f'<div class="op-compare-panel">'
             f'<div class="op-compare-card">'
-            f'<p class="op-compare-title">Which run is better?</p>'
-            f'<p class="op-compare-best">{cmp["icon"]} Best Run: {cmp["best_label"]}</p>'
+            f'<p class="op-compare-title">Recommended Run</p>'
+            f'<p class="op-compare-best">{cmp["icon"]} {cmp["best_label"]}</p>'
             + "".join(f'<p class="op-result-msg">\u2022 {b}</p>' for b in cmp["bullets"])
-            + '</div>',
+            + '</div></div>',
             unsafe_allow_html=True,
         )
         def _go_advanced():
             st.session_state["_switch_to_advanced"] = True
-        st.button("Show advanced comparison details \u2192",
+        st.button("View advanced comparison \u2192",
                   key="op_switch_advanced", on_click=_go_advanced)
 
     # Show details for the best/only run
@@ -514,11 +553,11 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
     # ── C) Three stage cards ──
     cols = st.columns(3)
     stages = [
-        ("Floc Formation", formation),
-        ("Floc Size", size),
-        ("Settling", settling),
+        ("Floc Formation", formation, "Higher growth = stronger coagulation"),
+        ("Floc Size", size, "Larger flocs usually settle faster"),
+        ("Settling", settling, "Lower t50 = faster clarification"),
     ]
-    for col, (name, stage) in zip(cols, stages):
+    for col, (name, stage, hint) in zip(cols, stages):
         with col:
             st.markdown(
                 f'<div class="op-stage-card">'
@@ -526,12 +565,13 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
                 f'<p class="op-stage-name">{name}</p>'
                 f'<p class="op-stage-value">{stage.value_text}</p>'
                 f'<p class="op-stage-msg">{stage.message}</p>'
+                f'<p class="op-stage-hint">{hint}</p>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
 
     # ── D) Plot with metric selector ──
-    st.markdown("---")
+    st.markdown('<div style="margin-top:24px"></div>', unsafe_allow_html=True)
 
     # Determine which metrics are available for the current run
     available_metrics = {}
@@ -559,7 +599,7 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
     sel_col, note_col = st.columns([2, 3])
     with sel_col:
         selected_metric = st.selectbox(
-            "Y-axis metric",
+            "Chart metric",
             metric_options,
             index=default_idx,
             format_func=lambda k: metric_labels[k],
