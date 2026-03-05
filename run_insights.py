@@ -185,6 +185,20 @@ st.markdown("""
         font-size: 1.35rem;
         font-weight: 700;
         color: #1B2A3D !important;
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: unset !important;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        line-height: 1.3;
+        min-width: 0;
+    }
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] > div {
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: unset !important;
+        overflow-wrap: anywhere;
+        min-width: 0;
     }
 
     /* ── Score progress bar ── */
