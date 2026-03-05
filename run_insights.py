@@ -160,6 +160,22 @@ st.markdown("""
         background-color: #0284C7 !important;
     }
 
+    /* ── Metric row labels ── */
+    .metrics-row-label {
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: #526580;
+        margin: 12px 0 1px 0;
+        line-height: 1.2;
+    }
+    .metrics-row-desc {
+        font-size: 0.68rem;
+        color: #8C9BB0;
+        margin: 0 0 6px 0;
+    }
+
     /* ── Metric cards ── */
     div[data-testid="stMetric"] {
         background: #FFFFFF;
@@ -952,7 +968,12 @@ with root.container():
             with st.container(border=True):
                 st.markdown(f"#### {meta.label}")
 
-                # Row 1: Score, Growth Rate, Pre-settle Ø, Settling t50
+                # Row 1: Performance
+                st.markdown(
+                    '<p class="metrics-row-label">Performance</p>'
+                    '<p class="metrics-row-desc">Overall floc quality indicators</p>',
+                    unsafe_allow_html=True,
+                )
                 c1, c2, c3, c4 = st.columns(4)
                 with c1:
                     st.metric("Score", f"{kpi.score}/100" if kpi.score is not None else "N/A",
@@ -977,6 +998,12 @@ with root.container():
                 c4.metric("Settling t50", f"{kpi.t50_min} min" if kpi.t50_min else "N/A",
                            help=METRIC_HELP["settling_t50"]["short"])
 
+                # Row 2: Process Timing
+                st.markdown(
+                    '<p class="metrics-row-label">Process Timing</p>'
+                    '<p class="metrics-row-desc">Duration of each mixing stage</p>',
+                    unsafe_allow_html=True,
+                )
                 c5, c6, c7, c8 = st.columns(4)
                 c5.metric("Rapid Mix", f"{kpi.rapid_mix_duration_min:.1f} min" if kpi.rapid_mix_duration_min else "N/A",
                            help=METRIC_HELP["rapid_mix_duration"]["short"])
@@ -987,8 +1014,13 @@ with root.container():
                 c8.metric("Plateau CV", f"{kpi.plateau_cv}%" if kpi.plateau_cv else "N/A",
                            help=METRIC_HELP["plateau_cv"]["short"])
 
-                # Threshold times
+                # Row 3: Floc Growth Milestones
                 if thresholds:
+                    st.markdown(
+                        '<p class="metrics-row-label">Floc Growth Milestones</p>'
+                        '<p class="metrics-row-desc">Time to reach key floc sizes</p>',
+                        unsafe_allow_html=True,
+                    )
                     thr_cols = st.columns(len(thresholds))
                     for tc, thr in zip(thr_cols, thresholds):
                         val = kpi.time_to_thresholds_min.get(thr)
