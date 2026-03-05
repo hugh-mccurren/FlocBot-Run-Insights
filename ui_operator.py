@@ -280,15 +280,6 @@ def plot_metric_simple(df, phases, meta_label, go, phase_colors, phase_labels,
             showarrow=False,
             font=dict(size=10, color="gray"),
         )
-        subtitle = _PHASE_SUBTITLES.get(p.name)
-        if subtitle:
-            fig.add_annotation(
-                x=mid_x, y=0.98, yref="paper",
-                xanchor="center", yanchor="top",
-                text=subtitle,
-                showarrow=False,
-                font=dict(size=8, color="#8C9BB0"),
-            )
 
     # Settling start line
     se = phase_by_name(phases, "settling")
