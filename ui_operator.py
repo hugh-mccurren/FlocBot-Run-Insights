@@ -3,11 +3,21 @@ ui_operator.py – Operator Mode dashboard for FlocBot Run Insights.
 
 Provides a simplified, traffic-light-based view of run quality
 with recommended actions. Reuses existing KPI pipeline outputs.
+
+Evaluation priority:
+  1. Multi-run comparison (relative to other loaded runs)
+  2. Plant-specific baseline (saved representative performance)
+  3. Fallback heuristic thresholds (generic, used provisionally)
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+import json
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
+
+import re as _re
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -43,7 +53,125 @@ _PHASE_SUBTITLES = {
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Thresholds for traffic-light evaluation
+# Plant baseline storage
+# ═══════════════════════════════════════════════════════════════════════════
+
+_BASELINES_DIR = Path(__file__).parent / "baselines"
+
+
+@dataclass
+class PlantBaseline:
+    """Representative performance values for a plant/protocol."""
+    protocol: str
+    growth_rate_um_per_min: Optional[float] = None
+    time_to_300_min: Optional[float] = None
+    pre_settle_diameter_um: Optional[float] = None
+    t50_min: Optional[float] = None
+
+    def to_dict(self) -> dict:
+        return {k: v for k, v in self.__dict__.items() if v is not None}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> PlantBaseline:
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+
+
+def _baseline_path(protocol: str) -> Path:
+    safe = _re.sub(r'[^\w\s\-()]', '', protocol).strip().replace(' ', '_')
+    return _BASELINES_DIR / f"{safe}.json"
+
+
+def save_baseline(protocol: str, baseline: PlantBaseline) -> None:
+    _BASELINES_DIR.mkdir(exist_ok=True)
+    path = _baseline_path(protocol)
+    path.write_text(json.dumps(baseline.to_dict(), indent=2))
+
+
+def load_baseline(protocol: str) -> Optional[PlantBaseline]:
+    path = _baseline_path(protocol)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+        return PlantBaseline.from_dict(data)
+    except Exception:
+        return None
+
+
+def save_baseline_from_kpi(protocol: str, kpi) -> PlantBaseline:
+    """Create and save a baseline from a run's KPI values."""
+    bl = PlantBaseline(
+        protocol=protocol,
+        growth_rate_um_per_min=kpi.growth_rate_um_per_min,
+        time_to_300_min=kpi.time_to_thresholds_min.get(300),
+        pre_settle_diameter_um=kpi.pre_settle_diameter_um,
+        t50_min=kpi.t50_min,
+    )
+    save_baseline(protocol, bl)
+    return bl
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Evaluation context – determines how runs are classified
+# ═══════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class EvalContext:
+    """Contextual information for evaluating a run."""
+    mode: str = "fallback"    # "comparison", "baseline", "fallback"
+    mode_label: str = "Preliminary assessment based on generic thresholds"
+    # Comparison-set stats (populated when mode == "comparison")
+    best_score: Optional[float] = None
+    worst_score: Optional[float] = None
+    mean_score: Optional[float] = None
+    is_best_run: bool = False
+    run_rank: int = 0          # 0-based, 0 = best
+    run_count: int = 1
+    # Plant baseline (populated when mode == "baseline")
+    baseline: Optional[PlantBaseline] = None
+
+
+def build_eval_context(runs: list[dict], current_kpi, current_meta) -> EvalContext:
+    """Build the appropriate evaluation context for a run."""
+    protocol = getattr(current_meta, "protocol_title", "") or ""
+    current_score = current_kpi.score
+
+    # Priority 1: multi-run comparison
+    if len(runs) >= 2:
+        scores = [r["kpi"].score for r in runs if r["kpi"].score is not None]
+        if len(scores) >= 2:
+            scores_sorted = sorted(scores, reverse=True)
+            rank = scores_sorted.index(current_score) if current_score in scores_sorted else len(scores_sorted)
+            return EvalContext(
+                mode="comparison",
+                mode_label=f"Evaluated relative to {len(scores)} loaded runs",
+                best_score=max(scores),
+                worst_score=min(scores),
+                mean_score=sum(scores) / len(scores),
+                is_best_run=(current_score == max(scores)),
+                run_rank=rank,
+                run_count=len(scores),
+            )
+
+    # Priority 2: plant baseline
+    if protocol:
+        bl = load_baseline(protocol)
+        if bl is not None:
+            return EvalContext(
+                mode="baseline",
+                mode_label=f"Evaluated against {protocol} baseline",
+                baseline=bl,
+            )
+
+    # Priority 3: fallback
+    return EvalContext(
+        mode="fallback",
+        mode_label="Preliminary assessment based on generic thresholds",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Fallback thresholds (used only when no comparison or baseline exists)
 # ═══════════════════════════════════════════════════════════════════════════
 
 _FORMATION_THRESHOLDS = {
@@ -70,17 +198,44 @@ _SETTLING_THRESHOLDS = {
 
 @dataclass
 class StageResult:
-    status: str          # "good", "mixed", "poor"
+    status: str          # "good", "marginal", "poor"
     icon: str            # traffic-light emoji
     value_text: str      # formatted key number
     message: str         # short explanation
 
 
 def _status_icon(status: str) -> str:
-    return {"good": "\U0001f7e2", "mixed": "\U0001f7e1", "poor": "\U0001f534"}[status]
+    return {"good": "\U0001f7e2", "marginal": "\U0001f7e1", "poor": "\U0001f534"}[status]
 
 
-def evaluate_formation(kpi) -> StageResult:
+def _relative_status(value: Optional[float], baseline_value: Optional[float],
+                     higher_is_better: bool = True,
+                     marginal_pct: float = 0.20, poor_pct: float = 0.40) -> str:
+    """Classify a value relative to a baseline.
+    marginal_pct = how far below baseline before 'marginal' (20% default).
+    poor_pct = how far below baseline before 'poor' (40% default)."""
+    if value is None or baseline_value is None or baseline_value == 0:
+        return "marginal"
+    if higher_is_better:
+        ratio = value / baseline_value
+        if ratio >= (1.0 - marginal_pct):
+            return "good"
+        elif ratio >= (1.0 - poor_pct):
+            return "marginal"
+        else:
+            return "poor"
+    else:
+        # Lower is better (e.g. time-to-threshold, settling t50)
+        ratio = value / baseline_value
+        if ratio <= (1.0 + marginal_pct):
+            return "good"
+        elif ratio <= (1.0 + poor_pct):
+            return "marginal"
+        else:
+            return "poor"
+
+
+def evaluate_formation(kpi, ctx: Optional[EvalContext] = None) -> StageResult:
     gr = kpi.growth_rate_um_per_min
     t300 = kpi.time_to_thresholds_min.get(300)
 
@@ -88,6 +243,42 @@ def evaluate_formation(kpi) -> StageResult:
         return StageResult("poor", _status_icon("poor"), "N/A",
                            "Growth rate could not be measured")
 
+    val = f"{gr:.0f} \u00b5m/min"
+
+    # --- Comparison mode: best run gets "good", others relative ---
+    if ctx and ctx.mode == "comparison":
+        if ctx.is_best_run:
+            parts = [f"Best formation in set ({gr:.0f} \u00b5m/min)"]
+            if t300 is not None:
+                parts.append(f"300 \u00b5m at {t300:.1f} min")
+            return StageResult("good", _status_icon("good"), val, ", ".join(parts))
+        else:
+            parts = [f"Growth {gr:.0f} \u00b5m/min"]
+            if t300 is not None:
+                parts.append(f"300 \u00b5m at {t300:.1f} min")
+            # Use score rank for classification
+            if ctx.run_count > 0 and ctx.run_rank <= ctx.run_count * 0.5:
+                status = "good"
+            else:
+                status = "marginal"
+            return StageResult(status, _status_icon(status), val, ", ".join(parts))
+
+    # --- Baseline mode ---
+    if ctx and ctx.mode == "baseline" and ctx.baseline:
+        bl = ctx.baseline
+        status = _relative_status(gr, bl.growth_rate_um_per_min, higher_is_better=True)
+        if bl.growth_rate_um_per_min:
+            msg = f"Growth {gr:.0f} \u00b5m/min (baseline: {bl.growth_rate_um_per_min:.0f})"
+        else:
+            msg = f"Growth {gr:.0f} \u00b5m/min"
+        if t300 is not None:
+            t_status = _relative_status(t300, bl.time_to_300_min, higher_is_better=False)
+            if t_status == "poor" and status != "poor":
+                status = "marginal"
+            msg += f", 300 \u00b5m at {t300:.1f} min"
+        return StageResult(status, _status_icon(status), val, msg)
+
+    # --- Fallback thresholds ---
     gr_good = gr >= _FORMATION_THRESHOLDS["growth_good"]
     gr_poor = gr < _FORMATION_THRESHOLDS["growth_poor"]
 
@@ -96,7 +287,7 @@ def evaluate_formation(kpi) -> StageResult:
         t_poor = t300 > _FORMATION_THRESHOLDS["time_poor"]
     else:
         t_good = False
-        t_poor = True  # threshold never reached
+        t_poor = True
 
     if gr_good and t_good:
         status = "good"
@@ -108,22 +299,46 @@ def evaluate_formation(kpi) -> StageResult:
         else:
             msg = "300 \u00b5m threshold not reached in time" if t300 is None else f"Slow to reach 300 \u00b5m ({t300:.1f} min)"
     else:
-        status = "mixed"
+        status = "marginal"
         parts = [f"Growth {gr:.0f} \u00b5m/min"]
         if t300 is not None:
             parts.append(f"300 \u00b5m at {t300:.1f} min")
         msg = ", ".join(parts)
 
-    val = f"{gr:.0f} \u00b5m/min"
     return StageResult(status, _status_icon(status), val, msg)
 
 
-def evaluate_floc_size(kpi) -> StageResult:
+def evaluate_floc_size(kpi, ctx: Optional[EvalContext] = None) -> StageResult:
     d = kpi.pre_settle_diameter_um
     if d is None:
         return StageResult("poor", _status_icon("poor"), "N/A",
                            "Pre-settle diameter not available")
 
+    val = f"{d:.0f} \u00b5m"
+
+    # --- Comparison mode ---
+    if ctx and ctx.mode == "comparison":
+        if ctx.is_best_run:
+            return StageResult("good", _status_icon("good"), val,
+                               f"Best floc size in set ({d:.0f} \u00b5m)")
+        if ctx.run_count > 0 and ctx.run_rank <= ctx.run_count * 0.5:
+            status = "good"
+        else:
+            status = "marginal"
+        return StageResult(status, _status_icon(status), val,
+                           f"Pre-settle floc size {d:.0f} \u00b5m")
+
+    # --- Baseline mode ---
+    if ctx and ctx.mode == "baseline" and ctx.baseline:
+        bl = ctx.baseline
+        status = _relative_status(d, bl.pre_settle_diameter_um, higher_is_better=True)
+        if bl.pre_settle_diameter_um:
+            msg = f"Pre-settle {d:.0f} \u00b5m (baseline: {bl.pre_settle_diameter_um:.0f})"
+        else:
+            msg = f"Pre-settle floc size {d:.0f} \u00b5m"
+        return StageResult(status, _status_icon(status), val, msg)
+
+    # --- Fallback ---
     if d >= _SIZE_THRESHOLDS["good"]:
         status = "good"
         msg = f"Large flocs ({d:.0f} \u00b5m) before settling"
@@ -131,23 +346,45 @@ def evaluate_floc_size(kpi) -> StageResult:
         status = "poor"
         msg = f"Small flocs ({d:.0f} \u00b5m) \u2013 may settle slowly"
     else:
-        status = "mixed"
+        status = "marginal"
         msg = f"Moderate floc size ({d:.0f} \u00b5m)"
 
-    return StageResult(status, _status_icon(status), f"{d:.0f} \u00b5m", msg)
+    return StageResult(status, _status_icon(status), val, msg)
 
 
-def evaluate_settling(kpi) -> StageResult:
+def evaluate_settling(kpi, ctx: Optional[EvalContext] = None) -> StageResult:
+    """Evaluate settling quality. Informational only — not used in scoring."""
+    _INFO = " (informational \u2014 not used in scoring)"
     t50 = kpi.t50_min
     if t50 is None:
-        # Check quality flags for extra context
-        has_low_count = any("unreliable" in f.lower() or "low" in f.lower()
-                           for f in kpi.quality_flags)
-        msg = "Settling t50 not measurable"
-        if has_low_count:
-            msg += " (low floc count during settling)"
-        return StageResult("poor", _status_icon("poor"), "N/A", msg)
+        return StageResult("marginal", _status_icon("marginal"), "N/A",
+                           "Settling data inconclusive" + _INFO)
 
+    val = f"{t50:.1f} min"
+
+    # --- Comparison mode ---
+    if ctx and ctx.mode == "comparison":
+        if ctx.is_best_run:
+            msg = f"Settling t50 = {t50:.1f} min (best run)"
+            return StageResult("good", _status_icon("good"), val, msg + _INFO)
+        msg = f"Settling t50 = {t50:.1f} min"
+        if ctx.run_count > 0 and ctx.run_rank <= ctx.run_count * 0.5:
+            status = "good"
+        else:
+            status = "marginal"
+        return StageResult(status, _status_icon(status), val, msg + _INFO)
+
+    # --- Baseline mode ---
+    if ctx and ctx.mode == "baseline" and ctx.baseline:
+        bl = ctx.baseline
+        status = _relative_status(t50, bl.t50_min, higher_is_better=False)
+        if bl.t50_min:
+            msg = f"Settling t50 = {t50:.1f} min (baseline: {bl.t50_min:.1f})"
+        else:
+            msg = f"Settling t50 = {t50:.1f} min"
+        return StageResult(status, _status_icon(status), val, msg + _INFO)
+
+    # --- Fallback ---
     if t50 <= _SETTLING_THRESHOLDS["good"]:
         status = "good"
         msg = f"Fast settling (t50 = {t50:.1f} min)"
@@ -155,54 +392,330 @@ def evaluate_settling(kpi) -> StageResult:
         status = "poor"
         msg = f"Slow settling (t50 = {t50:.1f} min)"
     else:
-        status = "mixed"
+        status = "marginal"
         msg = f"Moderate settling (t50 = {t50:.1f} min)"
 
-    return StageResult(status, _status_icon(status), f"{t50:.1f} min", msg)
+    return StageResult(status, _status_icon(status), val, msg + _INFO)
 
 
 def evaluate_overall(formation: StageResult, size: StageResult,
-                     settling: StageResult, kpi) -> StageResult:
-    statuses = [formation.status, size.status, settling.status]
+                     settling: StageResult, kpi,
+                     ctx: Optional[EvalContext] = None) -> StageResult:
+    """Overall run result. Based on formation and size only."""
+
+    # --- Comparison mode: best run is always "good" ---
+    if ctx and ctx.mode == "comparison" and ctx.is_best_run:
+        return StageResult("good", _status_icon("good"), "",
+                           "Best performing run in this set")
+
+    statuses = [formation.status, size.status]
     n_good = statuses.count("good")
     n_poor = statuses.count("poor")
 
-    # Check for severe confidence issues
-    severe_flags = any("unreliable" in f.lower() for f in kpi.quality_flags)
-
-    if n_poor >= 2 or (n_poor >= 1 and severe_flags):
+    if n_poor == 2:
         status = "poor"
-        msg = "Multiple stages underperforming"
-    elif n_good >= 2 and n_poor == 0:
+        msg = "Formation and size both underperforming"
+    elif n_poor == 1:
+        status = "marginal"
+        which = "Formation" if formation.status == "poor" else "Floc size"
+        msg = f"{which} needs attention"
+    elif n_good == 2:
         status = "good"
-        msg = "Strong performance across stages"
+        msg = "Strong formation and floc size"
+    elif n_good == 1:
+        status = "good"
+        msg = "Good overall \u2013 one stage marginal"
     else:
-        status = "mixed"
-        msg = "Mixed results \u2013 some stages need attention"
+        # both marginal
+        status = "marginal"
+        msg = "Room for improvement \u2013 performance is within a workable range"
+
+    # Add context label for baseline/fallback
+    if ctx and ctx.mode == "baseline":
+        msg += " (relative to plant baseline)"
+    elif ctx and ctx.mode == "fallback":
+        msg += " (based on generic thresholds)"
 
     return StageResult(status, _status_icon(status), "", msg)
 
 
-def recommend_action(formation: StageResult, size: StageResult,
-                     settling: StageResult,
-                     overall: StageResult) -> tuple[str, str]:
-    """Returns (action_text, explanation)."""
+# ═══════════════════════════════════════════════════════════════════════════
+# Single-run recommendation (no comparative data)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def recommend_action_single(formation: StageResult, size: StageResult,
+                            settling: StageResult,
+                            overall: StageResult) -> tuple[str, str]:
+    """Single-run recommendation (no comparative data available)."""
     if overall.status == "good":
-        return "Keep dose", "Run quality is good across all stages."
+        return "Keep current dose", "Formation and floc size look good."
 
     if formation.status == "poor":
-        return "Re-test", "Verify mixing conditions and coagulant feed."
+        return ("No clear dose recommendation",
+                "Formation is poor \u2013 verify mixing conditions and coagulant feed before adjusting dose.")
 
-    if settling.status == "poor" and formation.status == "good":
-        return "Consider slight dose increase", "Flocs form well but settle slowly \u2013 may need more polymer or higher dose."
+    if size.status == "poor" and formation.status != "poor":
+        return ("Consider increasing coagulant dose",
+                "Flocs are forming but staying small \u2013 a higher dose may improve size.")
 
-    if overall.status == "mixed":
-        # Check if data is noisy
-        if size.status == "poor" and formation.status != "poor":
-            return "Consider dose increase", "Flocs are forming but staying small."
-        return "Re-test", "Results are mixed \u2013 another run may clarify."
+    if overall.status == "marginal":
+        return ("No clear dose recommendation",
+                "Results are marginal \u2013 upload additional runs at different doses to compare.")
 
-    return "Re-test (data noisy)", "Insufficient clarity to make a dosing recommendation."
+    return ("No clear dose recommendation",
+            "Insufficient data to make a dosing recommendation \u2013 upload additional runs to compare.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Dose parsing and comparative recommendation
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _parse_doses(meta) -> tuple[dict[str, Optional[float]], set[str]]:
+    """Parse chemistry/dosage fields into ({chemical_name: numeric_dose}, unnamed_set).
+
+    Expects slash-delimited chemistry names and dose values, e.g.:
+        chemistry = "Alum/Poly/Reclaim %"
+        dosage    = "20/2.75/4/81"
+    Returns e.g. ({"Alum": 20.0, "Poly": 2.75, ...}, {"Variable 4"})
+    """
+    dosage_str = getattr(meta, "run_dosage", "") or ""
+    chemistry_str = getattr(meta, "run_chemistry", "") or ""
+
+    if not dosage_str.strip():
+        return {}, set()
+
+    dosage_clean = _re.sub(r"\s+[a-zA-Z/]+\s*$", "", dosage_str.strip())
+
+    dose_parts = [p.strip() for p in dosage_clean.split("/")]
+    chem_parts = [p.strip() for p in chemistry_str.split("/")] if chemistry_str.strip() else []
+
+    result: dict[str, Optional[float]] = {}
+    unnamed: set[str] = set()
+    for i, raw_dose in enumerate(dose_parts):
+        if i < len(chem_parts) and chem_parts[i]:
+            name = chem_parts[i]
+        else:
+            name = f"Variable {i + 1}"
+            unnamed.add(name)
+        try:
+            result[name] = float(raw_dose)
+        except (ValueError, TypeError):
+            result[name] = None
+
+    return result, unnamed
+
+
+@dataclass
+class ChemicalRec:
+    """Dose recommendation for a single chemical."""
+    chemical: str
+    direction: str       # "increase", "decrease", "keep", "unclear"
+    explanation: str
+    is_named: bool = True
+
+
+@dataclass
+class DoseRecommendation:
+    """Full dose recommendation from multi-run comparison."""
+    chemicals: list       # list[ChemicalRec]
+    summary: str
+    explanation: str
+
+
+def _compare_doses(runs: list[dict]) -> Optional[DoseRecommendation]:
+    """Compare runs by dose and performance, returning per-chemical guidance."""
+    entries = []
+    all_unnamed: set[str] = set()
+    for r in runs:
+        score = r["kpi"].score
+        if score is None:
+            continue
+        doses, unnamed = _parse_doses(r["meta"])
+        if not doses:
+            continue
+        all_unnamed |= unnamed
+        entries.append((doses, score))
+
+    if len(entries) < 2:
+        return None
+
+    all_chems: list[str] = []
+    seen: set[str] = set()
+    for doses, _ in entries:
+        for c in doses:
+            if c not in seen:
+                all_chems.append(c)
+                seen.add(c)
+
+    recs: list[ChemicalRec] = []
+
+    for chem in all_chems:
+        named = chem not in all_unnamed
+        dose_suffix = " dose" if named else ""
+        values_label = f"{chem}{dose_suffix}"
+
+        pairs = []
+        for doses, score in entries:
+            val = doses.get(chem)
+            if val is not None:
+                pairs.append((val, score))
+
+        if len(pairs) < 2:
+            continue
+
+        unique_doses = set(d for d, _ in pairs)
+        if len(unique_doses) <= 1:
+            continue
+
+        other_chems_changed = []
+        for other in all_chems:
+            if other == chem:
+                continue
+            other_vals = set()
+            for doses, _ in entries:
+                v = doses.get(other)
+                if v is not None:
+                    other_vals.add(v)
+            if len(other_vals) > 1:
+                other_chems_changed.append(other)
+
+        pairs.sort(key=lambda x: x[0])
+
+        n = len(pairs)
+        higher_better = 0
+        lower_better = 0
+        for i in range(n):
+            for j in range(i + 1, n):
+                d_i, s_i = pairs[i]
+                d_j, s_j = pairs[j]
+                if d_j > d_i:
+                    if s_j > s_i:
+                        higher_better += 1
+                    elif s_j < s_i:
+                        lower_better += 1
+
+        total_comparisons = higher_better + lower_better
+        if total_comparisons == 0:
+            recs.append(ChemicalRec(
+                chem, "keep",
+                f"Performance was similar across {values_label} values tested.",
+                is_named=named,
+            ))
+            continue
+
+        confounded = len(other_chems_changed) > 0
+
+        if confounded:
+            changed_names = ", ".join(other_chems_changed)
+            if higher_better > lower_better:
+                recs.append(ChemicalRec(
+                    chem, "unclear",
+                    f"Higher {values_label} trended better, but {changed_names} also "
+                    f"changed between runs \u2013 effect cannot be isolated.",
+                    is_named=named,
+                ))
+            elif lower_better > higher_better:
+                recs.append(ChemicalRec(
+                    chem, "unclear",
+                    f"Lower {values_label} trended better, but {changed_names} also "
+                    f"changed between runs \u2013 effect cannot be isolated.",
+                    is_named=named,
+                ))
+            else:
+                recs.append(ChemicalRec(
+                    chem, "unclear",
+                    f"No clear trend for {chem} \u2013 {changed_names} also "
+                    f"changed between runs.",
+                    is_named=named,
+                ))
+            continue
+
+        ratio = max(higher_better, lower_better) / total_comparisons
+
+        if higher_better > lower_better:
+            consistency = "consistently" if ratio >= 0.75 else "generally"
+            extra = "" if ratio >= 0.75 else f" ({higher_better}/{total_comparisons} comparisons)"
+            recs.append(ChemicalRec(
+                chem, "increase",
+                f"Higher {values_label} {consistency} performed better.{extra}",
+                is_named=named,
+            ))
+        elif lower_better > higher_better:
+            consistency = "consistently" if ratio >= 0.75 else "generally"
+            extra = "" if ratio >= 0.75 else f" ({lower_better}/{total_comparisons} comparisons)"
+            recs.append(ChemicalRec(
+                chem, "decrease",
+                f"Lower {values_label} {consistency} performed better.{extra}",
+                is_named=named,
+            ))
+        else:
+            recs.append(ChemicalRec(
+                chem, "keep",
+                f"Performance was similar across {values_label} values tested.",
+                is_named=named,
+            ))
+
+    if not recs:
+        return None
+
+    summary, explanation = _build_dose_summary(recs)
+    return DoseRecommendation(chemicals=recs, summary=summary, explanation=explanation)
+
+
+def _build_dose_summary(recs: list[ChemicalRec]) -> tuple[str, str]:
+    """Build a one-line summary and explanation from per-chemical recs."""
+    direction_labels = {
+        "increase": "Consider increasing",
+        "decrease": "Consider decreasing",
+        "keep": "Keep current",
+        "unclear": "No clear recommendation for",
+    }
+
+    actionable = [r for r in recs if r.direction in ("increase", "decrease")]
+    keeps = [r for r in recs if r.direction == "keep"]
+    unclear = [r for r in recs if r.direction == "unclear"]
+
+    if not actionable and not keeps and unclear:
+        return ("No clear dose recommendation",
+                unclear[0].explanation)
+
+    if not actionable and keeps:
+        return ("Keep current dose",
+                keeps[0].explanation)
+
+    if len(actionable) == 1 and not unclear:
+        r = actionable[0]
+        dose_suffix = " dose" if r.is_named else ""
+        return (f"{direction_labels[r.direction]} {r.chemical}{dose_suffix}",
+                r.explanation)
+
+    # Multiple actionable or mixed with unclear
+    parts = []
+    for r in actionable:
+        dose_suffix = " dose" if r.is_named else ""
+        parts.append(f"{direction_labels[r.direction]} {r.chemical}{dose_suffix}")
+    for r in unclear:
+        parts.append(f"{direction_labels[r.direction]} {r.chemical}")
+
+    summary = parts[0] if len(parts) >= 1 else "No clear dose recommendation"
+    explanation = " ".join(r.explanation for r in recs)
+    return summary, explanation
+
+
+def recommend_action(formation: StageResult, size: StageResult,
+                     settling: StageResult,
+                     overall: StageResult,
+                     runs: Optional[list] = None) -> tuple[str, str]:
+    """Returns (action_text, explanation).
+
+    When multiple runs are available, uses comparative dose analysis.
+    Falls back to single-run heuristics otherwise."""
+    if runs and len(runs) >= 2:
+        dose_rec = _compare_doses(runs)
+        if dose_rec is not None:
+            return dose_rec.summary, dose_rec.explanation
+
+    return recommend_action_single(formation, size, settling, overall)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -214,17 +727,18 @@ def compare_runs(runs: list[dict]) -> dict:
     scored = [(i, r) for i, r in enumerate(runs) if r["kpi"].score is not None]
     if not scored:
         return {"best_idx": 0, "best_label": runs[0]["meta"].label,
-                "status": "mixed", "icon": _status_icon("mixed"),
+                "status": "marginal", "icon": _status_icon("marginal"),
                 "bullets": ["No scores available for comparison"]}
 
     scored.sort(key=lambda x: x[1]["kpi"].score, reverse=True)
     best_i, best_run = scored[0]
     best_kpi = best_run["kpi"]
 
-    formation = evaluate_formation(best_kpi)
-    size = evaluate_floc_size(best_kpi)
-    settling = evaluate_settling(best_kpi)
-    overall = evaluate_overall(formation, size, settling, best_kpi)
+    ctx = build_eval_context(runs, best_kpi, best_run["meta"])
+    formation = evaluate_formation(best_kpi, ctx)
+    size = evaluate_floc_size(best_kpi, ctx)
+    settling = evaluate_settling(best_kpi, ctx)
+    overall = evaluate_overall(formation, size, settling, best_kpi, ctx)
 
     bullets = []
     if best_kpi.score is not None:
@@ -265,7 +779,6 @@ def plot_metric_simple(df, phases, meta_label, go, phase_colors, phase_labels,
         hovertemplate=cfg["tooltip_template"],
     ))
 
-    # Phase shading
     for p in phases:
         fig.add_vrect(
             x0=p.start_min, x1=p.end_min,
@@ -281,7 +794,6 @@ def plot_metric_simple(df, phases, meta_label, go, phase_colors, phase_labels,
             font=dict(size=10, color="gray"),
         )
 
-    # Settling start line
     se = phase_by_name(phases, "settling")
     if se:
         fig.add_vline(x=se.start_min, line_dash="dash", line_color="#0284C7",
@@ -321,7 +833,7 @@ OPERATOR_CSS = """
         text-align: center;
     }
     .op-result-card.good { border-top: 4px solid #059669; }
-    .op-result-card.mixed { border-top: 4px solid #D97706; }
+    .op-result-card.marginal { border-top: 4px solid #D97706; }
     .op-result-card.poor { border-top: 4px solid #DC2626; }
 
     .op-result-icon { font-size: 2.5rem; margin-bottom: 4px; }
@@ -343,6 +855,12 @@ OPERATOR_CSS = """
         font-size: 0.88rem;
         color: #526580;
         margin: 0;
+    }
+    .op-eval-mode {
+        font-size: 0.72rem;
+        color: #8C9BB0;
+        font-style: italic;
+        margin-top: 8px;
     }
 
     .op-action-card {
@@ -372,6 +890,16 @@ OPERATOR_CSS = """
         font-size: 0.85rem;
         color: #526580;
         margin: 0;
+    }
+    .op-action-chem {
+        font-size: 0.82rem;
+        color: #334155;
+        margin: 6px 0 0 0;
+        padding-left: 4px;
+    }
+    .op-action-chem-detail {
+        color: #526580;
+        font-weight: 400;
     }
 
     .op-stage-card {
@@ -511,14 +1039,22 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
         df = display_run["df"]
         phases = display_run["phases"]
 
-    # ── Evaluate stages ──
-    formation = evaluate_formation(kpi)
-    size = evaluate_floc_size(kpi)
-    settling = evaluate_settling(kpi)
-    overall = evaluate_overall(formation, size, settling, kpi)
-    action, action_reason = recommend_action(formation, size, settling, overall)
+    # ── Build evaluation context ──
+    ctx = build_eval_context(runs, kpi, meta)
 
-    status_word = {"good": "Good", "mixed": "Mixed", "poor": "Poor"}[overall.status]
+    # ── Evaluate stages ──
+    formation = evaluate_formation(kpi, ctx)
+    size = evaluate_floc_size(kpi, ctx)
+    settling = evaluate_settling(kpi, ctx)
+    overall = evaluate_overall(formation, size, settling, kpi, ctx)
+    action, action_reason = recommend_action(
+        formation, size, settling, overall, runs=runs if len(runs) >= 2 else None,
+    )
+
+    # Get per-chemical detail for multi-run
+    dose_rec = _compare_doses(runs) if len(runs) >= 2 else None
+
+    status_word = {"good": "Good", "marginal": "Marginal", "poor": "Poor"}[overall.status]
 
     # ── A) RUN RESULT card ──
     st.markdown(
@@ -527,16 +1063,33 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
         f'<p class="op-result-icon">{overall.icon}</p>'
         f'<p class="op-result-status">{status_word}</p>'
         f'<p class="op-result-msg">{overall.message}</p>'
+        f'<p class="op-eval-mode">{ctx.mode_label}</p>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
     # ── B) RECOMMENDED ACTION card ──
+    _dir_icons = {"increase": "\u2191", "decrease": "\u2193",
+                  "keep": "\u2713", "unclear": "?"}
+    chem_detail_html = ""
+    if dose_rec and dose_rec.chemicals:
+        lines = []
+        for cr in dose_rec.chemicals:
+            icon = _dir_icons.get(cr.direction, "")
+            label = cr.direction.capitalize()
+            lines.append(
+                f'<p class="op-action-chem">'
+                f'{icon} <strong>{cr.chemical}:</strong> {label} '
+                f'<span class="op-action-chem-detail">\u2013 {cr.explanation}</span></p>'
+            )
+        chem_detail_html = "".join(lines)
+
     st.markdown(
         f'<div class="op-action-card">'
         f'<p class="op-action-title">Recommended Action</p>'
         f'<p class="op-action-text">{action}</p>'
         f'<p class="op-action-reason">{action_reason}</p>'
+        f'{chem_detail_html}'
         f'</div>',
         unsafe_allow_html=True,
     )
@@ -546,7 +1099,7 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
     stages = [
         ("Floc Formation", formation, "Higher growth = stronger coagulation"),
         ("Floc Size", size, "Larger flocs usually settle faster"),
-        ("Settling", settling, "Lower t50 = faster clarification"),
+        ("Settling", settling, "Informational only \u2013 not used in scoring"),
     ]
     for col, (name, stage, hint) in zip(cols, stages):
         with col:
@@ -564,29 +1117,22 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
     # ── D) Plot with metric selector ──
     st.markdown('<div style="margin-top:24px"></div>', unsafe_allow_html=True)
 
-    # Determine which metrics are available for the current run
     available_metrics = {}
     for key, cfg in OPERATOR_METRICS.items():
         if cfg["column"] in df.columns:
             available_metrics[key] = cfg["display_name"]
         else:
-            available_metrics[key] = None  # mark unavailable
+            available_metrics[key] = None
 
-    # Build selectbox options (only available metrics are selectable)
     metric_options = [k for k, v in available_metrics.items() if v is not None]
     metric_labels = {k: OPERATOR_METRICS[k]["display_name"] for k in metric_options}
 
-    # Default to diameter; if somehow missing, take first available
     default_idx = metric_options.index(_DEFAULT_METRIC) if _DEFAULT_METRIC in metric_options else 0
 
-    # Guard: if the persisted selection is no longer available (e.g. user
-    # switched to a run without vol_conc), reset to default before the
-    # widget is created so Streamlit doesn't raise a mismatch error.
     persisted = st.session_state.get("op_metric_select")
     if persisted is not None and persisted not in metric_options:
         st.session_state["op_metric_select"] = metric_options[default_idx]
 
-    # Compact row: selector + unavailability note
     sel_col, note_col = st.columns([2, 3])
     with sel_col:
         selected_metric = st.selectbox(
@@ -597,7 +1143,6 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
             key="op_metric_select",
         )
 
-    # Show inline note for unavailable metrics
     unavailable = [OPERATOR_METRICS[k]["display_name"]
                    for k, v in available_metrics.items() if v is None]
     if unavailable:
@@ -626,3 +1171,23 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
         md_table = "| Field | Value |\n|:--|:--|\n"
         md_table += "\n".join(f"| {k} | {v} |" for k, v in md_rows)
         st.markdown(md_table)
+
+    # ── F) Save as plant baseline ──
+    protocol = meta.protocol_title or ""
+    if protocol:
+        with st.expander("Plant Baseline", expanded=False):
+            existing_bl = load_baseline(protocol)
+            if existing_bl:
+                st.caption(f"Baseline exists for **{protocol}**")
+                bl_items = []
+                if existing_bl.growth_rate_um_per_min is not None:
+                    bl_items.append(f"Growth: {existing_bl.growth_rate_um_per_min:.0f} \u00b5m/min")
+                if existing_bl.pre_settle_diameter_um is not None:
+                    bl_items.append(f"Pre-settle: {existing_bl.pre_settle_diameter_um:.0f} \u00b5m")
+                if existing_bl.t50_min is not None:
+                    bl_items.append(f"t50: {existing_bl.t50_min:.1f} min")
+                st.caption(" \u2022 ".join(bl_items) if bl_items else "No values stored")
+            if st.button("Save this run as baseline", key="op_save_baseline"):
+                save_baseline_from_kpi(protocol, kpi)
+                st.success(f"Baseline saved for {protocol}")
+                st.rerun()

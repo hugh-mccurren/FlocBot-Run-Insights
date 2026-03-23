@@ -36,7 +36,7 @@ def _load_heavy_deps():
     import plotly.graph_objects as _go
     from plotly.subplots import make_subplots as _make_subplots
     from fpdf import FPDF as _FPDF
-    from flocbot_parser import parse_file as _parse_file, RunMetadata as _RunMetadata
+    from flocbot_parser import parse_file as _parse_file, parse_file_all_sheets as _parse_file_all_sheets, RunMetadata as _RunMetadata
     from flocbot_metrics import (
         detect_phases as _detect_phases,
         compute_kpis as _compute_kpis,
@@ -53,6 +53,7 @@ def _load_heavy_deps():
         "make_subplots": _make_subplots,
         "FPDF": _FPDF,
         "parse_file": _parse_file,
+        "parse_file_all_sheets": _parse_file_all_sheets,
         "RunMetadata": _RunMetadata,
         "detect_phases": _detect_phases,
         "compute_kpis": _compute_kpis,
@@ -497,6 +498,7 @@ np = D["np"]
 go = D["go"]
 FPDF = D["FPDF"]
 parse_file = D["parse_file"]
+parse_file_all_sheets = D["parse_file_all_sheets"]
 detect_phases = D["detect_phases"]
 compute_kpis = D["compute_kpis"]
 compute_score = D["compute_score"]
@@ -511,15 +513,17 @@ phase_by_name = D["phase_by_name"]
 
 def parse_uploads(files):
     """Parse all uploaded files (I/O + phase detection).
+    Each valid sheet in a multi-sheet workbook becomes its own run.
     Returns list of dicts with keys: df, meta, phases; and a list of errors."""
     parsed = []
     errors = []
     for f in files:
         try:
             f.seek(0)
-            df, meta = parse_file(f)
-            phases = detect_phases(df)
-            parsed.append({"df": df, "meta": meta, "phases": phases})
+            sheet_results = parse_file_all_sheets(f)
+            for df, meta in sheet_results:
+                phases = detect_phases(df)
+                parsed.append({"df": df, "meta": meta, "phases": phases})
         except Exception as e:
             errors.append((getattr(f, "name", "?"), str(e)))
     return parsed, errors
@@ -538,16 +542,6 @@ for p in parsed:
 for fname, err in errors:
     st.error(f"**{fname}:** {err}")
 
-# Show import info for successfully parsed runs (multi-sheet, fallback, etc.)
-for r in runs:
-    meta = r["meta"]
-    dbg = getattr(meta, "import_debug", None)
-    if dbg and len(dbg.get("sheets_found", [])) > 1:
-        st.info(
-            f"📋 **{meta.filename}** — multi-sheet workbook detected. "
-            f"Using sheet **'{dbg['chosen_sheet']}'** "
-            f"(sheets found: {', '.join(dbg['sheets_found'])})."
-        )
 
 if not runs:
     st.warning("No valid runs were parsed.")

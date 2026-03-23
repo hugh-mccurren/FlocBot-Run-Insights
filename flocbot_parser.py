@@ -372,25 +372,17 @@ def _select_data_sheet(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def parse_file(uploaded_file) -> tuple[pd.DataFrame, RunMetadata]:
-    """
-    Parse a single RoboJar Excel export.
+def _parse_sheet(
+    xf: pd.ExcelFile,
+    score: _SheetScore,
+    fname: str,
+    engine_used: str,
+    all_scores: list[_SheetScore],
+    load_warnings: list[str],
+) -> tuple[pd.DataFrame, RunMetadata]:
+    """Parse a single validated sheet from an already-opened workbook."""
+    sheet_name = score.sheet_name
 
-    Handles multi-sheet workbooks (auto-detects the data sheet) and
-    legacy .xls files that fail with xlrd.
-
-    Returns (dataframe, metadata).
-    Raises ValueError with a descriptive, user-friendly message on failure.
-    """
-    fname = getattr(uploaded_file, "name", str(uploaded_file))
-
-    # ── Step 1: Open the workbook ──
-    xf, engine_used, load_warnings = load_robojar_workbook(uploaded_file)
-
-    # ── Step 2: Find the correct data sheet ──
-    chosen_sheet, best_score, all_scores = _select_data_sheet(xf)
-
-    # Build import debug info
     debug = {
         "engine": engine_used,
         "sheets_found": [s.sheet_name for s in all_scores],
@@ -406,11 +398,10 @@ def parse_file(uploaded_file) -> tuple[pd.DataFrame, RunMetadata]:
             }
             for s in all_scores
         },
-        "chosen_sheet": chosen_sheet,
+        "chosen_sheet": sheet_name,
     }
 
-    # ── Step 3: Read the chosen sheet (raw, for metadata) ──
-    raw = pd.read_excel(xf, sheet_name=chosen_sheet, header=None)
+    raw = pd.read_excel(xf, sheet_name=sheet_name, header=None)
 
     # --- metadata from the first rows ---
     raw_rows = raw.head(10).values.tolist()
@@ -418,21 +409,16 @@ def parse_file(uploaded_file) -> tuple[pd.DataFrame, RunMetadata]:
     meta.import_debug = debug
     meta.warnings.extend(load_warnings)
 
-    if len(all_scores) > 1:
-        meta.warnings.append(
-            f"Multi-sheet workbook: selected sheet '{chosen_sheet}' "
-            f"({len(best_score.matched_desired)} data columns matched)."
-        )
-
     # --- locate header row ---
-    header_idx = best_score.header_row
+    header_idx = score.header_row
     if header_idx is None:
         raise ValueError(
-            f"'{fname}': Could not find header row containing 'Date' and 'Time'."
+            f"'{fname}' sheet '{sheet_name}': Could not find header row "
+            f"containing 'Date' and 'Time'."
         )
 
-    # ── Step 4: Re-read with correct header ──
-    df = pd.read_excel(xf, sheet_name=chosen_sheet, header=header_idx)
+    # ── Re-read with correct header ──
+    df = pd.read_excel(xf, sheet_name=sheet_name, header=header_idx)
 
     # Drop fully-empty rows
     df.dropna(how="all", inplace=True)
@@ -457,11 +443,11 @@ def parse_file(uploaded_file) -> tuple[pd.DataFrame, RunMetadata]:
                 df["time_s"] = (dts - dts.iloc[0]).dt.total_seconds()
             except Exception:
                 raise ValueError(
-                    f"'{fname}': Cannot determine elapsed time – "
-                    "no 'Elapsed Time (s)' column and Date/Time parsing failed."
+                    f"'{fname}' sheet '{sheet_name}': Cannot determine elapsed "
+                    "time – no 'Elapsed Time (s)' column and Date/Time parsing failed."
                 )
         else:
-            raise ValueError(f"'{fname}': No time columns found.")
+            raise ValueError(f"'{fname}' sheet '{sheet_name}': No time columns found.")
 
     df["time_min"] = df["time_s"] / 60.0
 
@@ -477,3 +463,56 @@ def parse_file(uploaded_file) -> tuple[pd.DataFrame, RunMetadata]:
     df = df.dropna(subset=["time_s"]).reset_index(drop=True)
 
     return df, meta
+
+
+def parse_file(uploaded_file) -> tuple[pd.DataFrame, RunMetadata]:
+    """
+    Parse a single RoboJar Excel export (single-sheet mode).
+
+    For multi-sheet workbooks, picks the best sheet.
+    Use parse_file_all_sheets() to get every valid sheet as a separate run.
+
+    Returns (dataframe, metadata).
+    Raises ValueError with a descriptive, user-friendly message on failure.
+    """
+    results = parse_file_all_sheets(uploaded_file, single_best=True)
+    return results[0]
+
+
+def parse_file_all_sheets(
+    uploaded_file, *, single_best: bool = False
+) -> list[tuple[pd.DataFrame, RunMetadata]]:
+    """
+    Parse a RoboJar Excel export, returning one (df, meta) per valid sheet.
+
+    If single_best=True, returns only the single highest-scoring sheet
+    (backwards-compatible with the old parse_file behaviour).
+
+    Raises ValueError if no sheet contains valid RoboJar data.
+    """
+    fname = getattr(uploaded_file, "name", str(uploaded_file))
+
+    # ── Open the workbook ──
+    xf, engine_used, load_warnings = load_robojar_workbook(uploaded_file)
+
+    # ── Score every sheet ──
+    _, _, all_scores = _select_data_sheet(xf)
+
+    valid = [s for s in all_scores if s.is_valid]
+    # _select_data_sheet already raises if no valid sheets exist
+
+    if single_best:
+        best = max(valid, key=lambda s: s.sort_key)
+        valid = [best]
+
+    results: list[tuple[pd.DataFrame, RunMetadata]] = []
+    for score in valid:
+        df, meta = _parse_sheet(
+            xf, score, fname, engine_used, all_scores, list(load_warnings),
+        )
+        # Tag the label with sheet name when multiple sheets are present
+        if len(valid) > 1:
+            meta.filename = f"{fname} [{score.sheet_name}]"
+        results.append((df, meta))
+
+    return results
