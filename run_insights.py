@@ -458,11 +458,209 @@ with st.sidebar:
     st.title("FlocBot Run Insights")
     st.caption("Upload RoboJar exports to analyze flocculation performance.")
 
+    if "uploader_key" not in st.session_state:
+        st.session_state["uploader_key"] = 0
     uploaded_files = st.file_uploader(
         "Upload RoboJar exports",
         type=["xls", "xlsx"],
         accept_multiple_files=True,
+        key=f"file_uploader_{st.session_state['uploader_key']}",
     )
+
+    # Fetch past runs list (metadata only) — cached in session_state
+    import supabase_client as _db
+    from ui_operator import PlantBaseline, save_baseline_from_kpi, load_baseline
+
+    if "past_runs_meta" not in st.session_state:
+        try:
+            st.session_state["past_runs_meta"] = _db.get_runs_list(
+                st.session_state["user"]["access_token"]
+            )
+        except Exception:
+            st.session_state["past_runs_meta"] = []
+
+    _past_meta = st.session_state["past_runs_meta"]
+
+    # ── Plant Baseline ──
+    st.markdown("---")
+    st.markdown("### Plant Baseline")
+
+    # Helper: save a run as baseline
+    def _save_baseline_from_run(run_meta):
+        sj = run_meta.get("summary_json", {})
+        proto = sj.get("protocol_title", run_meta.get("protocol", ""))
+        if not proto:
+            st.warning("This run has no protocol — cannot set as baseline.")
+            return False
+        bl = PlantBaseline(
+            protocol=proto,
+            growth_rate_um_per_min=sj.get("growth_rate_um_per_min"),
+            time_to_300_min=(sj.get("time_to_thresholds_min") or {}).get("300") or (sj.get("time_to_thresholds_min") or {}).get("300.0"),
+            pre_settle_diameter_um=sj.get("pre_settle_diameter_um"),
+            t50_min=sj.get("t50_min"),
+        )
+        from ui_operator import save_baseline as _save_bl
+        _save_bl(proto, bl)
+        return True
+
+    # Look for any existing baseline across all protocols
+    _all_protocols = set(
+        rm.get("protocol") or rm.get("summary_json", {}).get("protocol_title", "")
+        for rm in _past_meta
+    ) if _past_meta else set()
+    _all_protocols.discard("")
+
+    existing_bl = None
+    _display_protocol = ""
+    for _p in _all_protocols:
+        existing_bl = load_baseline(_p)
+        if existing_bl:
+            _display_protocol = _p
+            break
+
+    if existing_bl:
+        # ── STATE 2: Baseline set — compact read-only display ──
+        st.caption(f"**{_display_protocol}**")
+        bl_items = []
+        if existing_bl.growth_rate_um_per_min is not None:
+            bl_items.append(f"Growth: {existing_bl.growth_rate_um_per_min:.0f} µm/min")
+        if existing_bl.pre_settle_diameter_um is not None:
+            bl_items.append(f"Pre-settle: {existing_bl.pre_settle_diameter_um:.0f} µm")
+        if existing_bl.t50_min is not None:
+            bl_items.append(f"t50: {existing_bl.t50_min:.1f} min")
+        if bl_items:
+            st.caption(" · ".join(bl_items))
+
+        # ── STATE 3: Change baseline (toggle) ──
+        if not st.session_state.get("_bl_changing"):
+            if st.button("Change Baseline", key="bl_change_toggle", type="tertiary"):
+                st.session_state["_bl_changing"] = True
+                st.session_state.pop("_confirm_baseline", None)
+                st.rerun()
+        else:
+            if _past_meta:
+                _bl_options = {
+                    rm["id"]: f"{rm.get('file_name', 'Run')} ({rm.get('created_at', '')[:10]})"
+                    for rm in _past_meta
+                }
+                _bl_run_id = st.selectbox(
+                    "Select a run",
+                    options=list(_bl_options.keys()),
+                    format_func=lambda x: _bl_options[x],
+                    key="bl_run_select",
+                )
+
+                if not st.session_state.get("_confirm_baseline"):
+                    _col_save, _col_cancel = st.columns(2)
+                    with _col_save:
+                        if st.button("Save", key="bl_save_new", type="primary"):
+                            st.session_state["_confirm_baseline"] = _bl_run_id
+                            st.rerun()
+                    with _col_cancel:
+                        if st.button("Cancel", key="bl_cancel_change"):
+                            st.session_state.pop("_bl_changing", None)
+                            st.rerun()
+                else:
+                    st.warning("Are you sure you want to replace the current baseline?")
+                    _col_yes, _col_no = st.columns(2)
+                    with _col_yes:
+                        if st.button("Yes, replace", key="bl_confirm_yes", type="primary"):
+                            _bl_rm = next((r for r in _past_meta if r["id"] == st.session_state["_confirm_baseline"]), None)
+                            if _bl_rm and _save_baseline_from_run(_bl_rm):
+                                st.session_state.pop("_confirm_baseline", None)
+                                st.session_state.pop("_bl_changing", None)
+                                st.success("Baseline updated!")
+                                st.rerun()
+                    with _col_no:
+                        if st.button("Cancel", key="bl_confirm_no"):
+                            st.session_state.pop("_confirm_baseline", None)
+                            st.session_state.pop("_bl_changing", None)
+                            st.rerun()
+
+    elif _past_meta:
+        # ── STATE 1: No baseline yet — prompt to set one ──
+        st.caption("No baseline set yet. Select a run to establish your plant baseline.")
+        _bl_options = {
+            rm["id"]: f"{rm.get('file_name', 'Run')} ({rm.get('created_at', '')[:10]})"
+            for rm in _past_meta
+        }
+        _bl_run_id = st.selectbox(
+            "Select a run",
+            options=list(_bl_options.keys()),
+            format_func=lambda x: _bl_options[x],
+            key="bl_run_select_initial",
+        )
+        if st.button("Set as Baseline", key="bl_set_initial", type="primary"):
+            _bl_rm = next((r for r in _past_meta if r["id"] == _bl_run_id), None)
+            if _bl_rm and _save_baseline_from_run(_bl_rm):
+                st.success("Baseline saved!")
+                st.rerun()
+
+    else:
+        # No runs at all yet
+        st.caption("Upload and save runs first, then set one as your plant baseline.")
+
+    # ── Run Library ──
+    st.markdown("---")
+    st.markdown("### Run Library")
+
+    # Initialize selected set — newly uploaded runs get added here automatically
+    if "selected_run_ids" not in st.session_state:
+        st.session_state["selected_run_ids"] = set()
+
+    if _past_meta:
+        if st.button("Clear All", use_container_width=True, key="clear_all_runs"):
+            st.session_state["selected_run_ids"].clear()
+            st.rerun()
+
+        # Scrollable run list
+        _run_list_container = st.container(height=300)
+        with _run_list_container:
+            for _rm in _past_meta:
+                _rid = _rm["id"]
+                _date = _rm.get("created_at", "")[:10]
+                _label = f"{_rm.get('file_name', 'Run')} ({_date})"
+                _default = _rid in st.session_state["selected_run_ids"]
+
+                _col_cb, _col_del = st.columns([5, 1])
+                with _col_cb:
+                    if st.checkbox(_label, value=_default, key=f"run_{_rid}"):
+                        st.session_state["selected_run_ids"].add(_rid)
+                    else:
+                        st.session_state["selected_run_ids"].discard(_rid)
+                with _col_del:
+                    if st.button("🗑", key=f"del_{_rid}", help="Delete this run"):
+                        st.session_state["_confirm_delete_run"] = _rid
+
+        # Confirmation dialog for delete (shown outside the scroll container)
+        _del_rid = st.session_state.get("_confirm_delete_run")
+        if _del_rid:
+            _del_name = next(
+                (r.get("file_name", "this run") for r in _past_meta if r["id"] == _del_rid),
+                "this run",
+            )
+            st.warning(f"Are you sure you want to delete **{_del_name}**?")
+            _col_yes, _col_no = st.columns(2)
+            with _col_yes:
+                if st.button("Yes, delete", key="confirm_del_yes", type="primary"):
+                    try:
+                        _db.delete_run(
+                            st.session_state["user"]["access_token"], _del_rid
+                        )
+                        st.session_state["selected_run_ids"].discard(_del_rid)
+                        st.session_state.get("loaded_runs_cache", {}).pop(_del_rid, None)
+                        st.session_state.pop("past_runs_meta", None)
+                    except Exception as e:
+                        st.error(f"Delete failed: {e}")
+                    st.session_state.pop("_confirm_delete_run", None)
+                    st.rerun()
+            with _col_no:
+                if st.button("Cancel", key="confirm_del_no"):
+                    st.session_state.pop("_confirm_delete_run", None)
+                    st.rerun()
+
+    else:
+        st.caption("No past runs saved yet.")
 
     st.markdown("---")
 
@@ -546,14 +744,100 @@ with st.sidebar:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Welcome screen (shown before heavy deps are needed)
+# Upload ingestion — parse, save to DB, auto-select, then let Run Library
+# be the single source of truth for what's displayed.
 # ═══════════════════════════════════════════════════════════════════════════
 
-if not uploaded_files:
+if uploaded_files:
+    # Only process files we haven't already ingested this session
+    _current_file_set = frozenset(
+        getattr(f, "file_id", f"{getattr(f, 'name', '')}_{getattr(f, 'size', 0)}")
+        for f in uploaded_files
+    )
+    if _current_file_set != st.session_state.get("_last_file_set"):
+        st.session_state["_last_file_set"] = _current_file_set
+
+        # Load heavy deps for parsing
+        with st.spinner("Loading analysis libraries..."):
+            D = _deps()
+        _parse_all = D["parse_file_all_sheets"]
+        _detect = D["detect_phases"]
+        _compute = D["compute_kpis"]
+        _score = D["compute_score"]
+
+        _ingest_errors = []
+        _saved_count = 0
+        for f in uploaded_files:
+            try:
+                f.seek(0)
+                for df, meta in _parse_all(f):
+                    phases = _detect(df)
+                    kpi = _compute(df, phases, thresholds=[250, 300, 350, 400, 450])
+                    _score(kpi)
+                    # Build summary for DB
+                    summary = {
+                        "filename": meta.filename,
+                        "protocol_title": meta.protocol_title,
+                        "run_chemistry": meta.run_chemistry,
+                        "run_dosage": meta.run_dosage,
+                        "comments": meta.comments,
+                        "generated_timestamp": meta.generated_timestamp,
+                        "rapid_mix_duration_min": kpi.rapid_mix_duration_min,
+                        "flocculation_duration_min": kpi.flocculation_duration_min,
+                        "settling_duration_min": kpi.settling_duration_min,
+                        "growth_rate_um_per_min": kpi.growth_rate_um_per_min,
+                        "growth_rate_r2": kpi.growth_rate_r2,
+                        "growth_rate_window": kpi.growth_rate_window,
+                        "pre_settle_diameter_um": kpi.pre_settle_diameter_um,
+                        "plateau_mean_um": kpi.plateau_mean_um,
+                        "plateau_cv": kpi.plateau_cv,
+                        "settle_baseline_vol_conc": kpi.settle_baseline_vol_conc,
+                        "t50_min": kpi.t50_min,
+                        "t10_min": kpi.t10_min,
+                        "time_to_thresholds_min": {str(k): v for k, v in kpi.time_to_thresholds_min.items()},
+                        "score": kpi.score,
+                        "score_components": kpi.score_components,
+                        "score_reason": kpi.score_reason,
+                        "quality_flags": kpi.quality_flags,
+                    }
+                    run_data_json = df.to_json(orient="split")
+                    user = st.session_state["user"]
+                    row = _db.save_run(
+                        access_token=user["access_token"],
+                        user_id=user["id"],
+                        file_name=meta.filename,
+                        protocol=meta.protocol_title or "",
+                        chemistry=meta.run_chemistry or "",
+                        dosage=meta.run_dosage or "",
+                        summary_json=summary,
+                        run_data_json=run_data_json,
+                    )
+                    st.session_state["selected_run_ids"].add(row["id"])
+                    _saved_count += 1
+            except Exception as e:
+                _ingest_errors.append((getattr(f, "name", "?"), str(e)))
+
+        # Refresh library, clear uploader, and show feedback
+        st.session_state.pop("past_runs_meta", None)
+        for fname, err in _ingest_errors:
+            st.error(f"**{fname}:** {err}")
+        if _saved_count:
+            st.session_state["uploader_key"] += 1  # reset uploader to empty drop zone
+            st.session_state.pop("_last_file_set", None)
+            st.success(f"{_saved_count} run{'s' if _saved_count != 1 else ''} saved to library.")
+            st.rerun()  # rerun so library list updates
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Welcome screen (no runs selected in library)
+# ═══════════════════════════════════════════════════════════════════════════
+
+if not st.session_state.get("selected_run_ids"):
     st.markdown("""<div class="welcome-card">
         <h2>Welcome to FlocBot Run Insights</h2>
         <p style="color:#526580; margin-bottom:20px;">
-            Upload one or more RoboJar Excel exports using the sidebar to get started.
+            Upload one or more RoboJar Excel exports using the sidebar,
+            or select past runs from your Run Library.
         </p>
         <ul style="color:#334155; line-height:2;">
             <li>Automatic phase detection (Rapid Mix / Flocculation / Settling)</li>
@@ -567,7 +851,7 @@ if not uploaded_files:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Heavy deps loaded only once files are uploaded
+# Heavy deps loaded only when runs are selected for display
 # ═══════════════════════════════════════════════════════════════════════════
 
 with st.spinner("Loading analysis libraries..."):
@@ -590,46 +874,101 @@ compute_score = D["compute_score"]
 Phase = D["Phase"]
 RunKPIs = D["RunKPIs"]
 phase_by_name = D["phase_by_name"]
+RunMetadata = D["RunMetadata"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Processing
+# Processing — single source: load selected runs from Run Library
 # ═══════════════════════════════════════════════════════════════════════════
 
-def parse_uploads(files):
-    """Parse all uploaded files (I/O + phase detection).
-    Each valid sheet in a multi-sheet workbook becomes its own run.
-    Returns list of dicts with keys: df, meta, phases; and a list of errors."""
-    parsed = []
-    errors = []
-    for f in files:
-        try:
-            f.seek(0)
-            sheet_results = parse_file_all_sheets(f)
-            for df, meta in sheet_results:
-                phases = detect_phases(df)
-                parsed.append({"df": df, "meta": meta, "phases": phases})
-        except Exception as e:
-            errors.append((getattr(f, "name", "?"), str(e)))
-    return parsed, errors
+def kpi_to_dict(meta, kpi):
+    """Full KPI dict for JSON export and DB storage."""
+    return {
+        "filename": meta.filename,
+        "protocol_title": meta.protocol_title,
+        "run_chemistry": meta.run_chemistry,
+        "run_dosage": meta.run_dosage,
+        "comments": meta.comments,
+        "generated_timestamp": meta.generated_timestamp,
+        "rapid_mix_duration_min": kpi.rapid_mix_duration_min,
+        "flocculation_duration_min": kpi.flocculation_duration_min,
+        "settling_duration_min": kpi.settling_duration_min,
+        "growth_rate_um_per_min": kpi.growth_rate_um_per_min,
+        "growth_rate_r2": kpi.growth_rate_r2,
+        "growth_rate_window": kpi.growth_rate_window,
+        "pre_settle_diameter_um": kpi.pre_settle_diameter_um,
+        "plateau_mean_um": kpi.plateau_mean_um,
+        "plateau_cv": kpi.plateau_cv,
+        "settle_baseline_vol_conc": kpi.settle_baseline_vol_conc,
+        "t50_min": kpi.t50_min,
+        "t10_min": kpi.t10_min,
+        "time_to_thresholds_min": {str(k): v for k, v in kpi.time_to_thresholds_min.items()},
+        "score": kpi.score,
+        "score_components": kpi.score_components,
+        "score_reason": kpi.score_reason,
+        "quality_flags": kpi.quality_flags,
+    }
 
 
-# --- Parse then compute KPIs with current sidebar values ---
-parsed, errors = parse_uploads(uploaded_files)
+def _load_run_from_db(run_meta: dict) -> dict | None:
+    """Load a run from DB and reconstruct the run dict {df, meta, phases}."""
+    try:
+        user = st.session_state["user"]
+        run_data_json = _db.get_run_data(user["access_token"], run_meta["id"])
+        df = pd.read_json(run_data_json, orient="split")
+        sj = run_meta.get("summary_json", {})
+        meta = RunMetadata(
+            filename=sj.get("filename", run_meta.get("file_name", "")),
+            generated_timestamp=sj.get("generated_timestamp", ""),
+            protocol_title=sj.get("protocol_title", run_meta.get("protocol", "")),
+            run_chemistry=sj.get("run_chemistry", run_meta.get("chemistry", "")),
+            run_dosage=sj.get("run_dosage", run_meta.get("dosage", "")),
+            comments=sj.get("comments", ""),
+        )
+        phases = detect_phases(df)
+        return {"df": df, "meta": meta, "phases": phases}
+    except Exception:
+        return None
 
+
+# --- Build runs list from selected library runs only ---
 runs = []
-for p in parsed:
-    kpi = compute_kpis(p["df"], p["phases"], thresholds=thresholds)
+
+if "loaded_runs_cache" not in st.session_state:
+    st.session_state["loaded_runs_cache"] = {}
+
+_lib_meta = st.session_state.get("past_runs_meta", [])
+_selected = st.session_state["selected_run_ids"]
+_cache = st.session_state["loaded_runs_cache"]
+
+for rm in _lib_meta:
+    rid = rm["id"]
+    if rid not in _selected:
+        continue
+
+    # Load from cache or fetch from DB
+    if rid not in _cache:
+        loaded = _load_run_from_db(rm)
+        if loaded:
+            _cache[rid] = loaded
+        else:
+            st.warning(f"Could not load run: {rm.get('file_name', rid)}")
+            continue
+
+    base = _cache[rid]
+    # Re-compute KPIs with current sidebar settings (thresholds/weights)
+    kpi = compute_kpis(base["df"], base["phases"], thresholds=thresholds)
     score_weights = dict(weights) if weights is not None else None
     compute_score(kpi, weights=score_weights, threshold_for_time=score_threshold)
-    runs.append({"df": p["df"], "meta": p["meta"], "phases": p["phases"], "kpi": kpi})
-
-for fname, err in errors:
-    st.error(f"**{fname}:** {err}")
-
+    runs.append({
+        "df": base["df"],
+        "meta": base["meta"],
+        "phases": base["phases"],
+        "kpi": kpi,
+    })
 
 if not runs:
-    st.warning("No valid runs were parsed.")
+    st.warning("Selected runs could not be loaded. Try refreshing the Run Library.")
     st.stop()
 
 
@@ -798,36 +1137,6 @@ def build_summary_row(meta, kpi):
     for thr, val in sorted(kpi.time_to_thresholds_min.items()):
         row[f"t_{int(thr)}μm (min)"] = val
     return row
-
-
-def kpi_to_dict(meta, kpi):
-    """Full KPI dict for JSON export."""
-    d = {
-        "filename": meta.filename,
-        "protocol_title": meta.protocol_title,
-        "run_chemistry": meta.run_chemistry,
-        "run_dosage": meta.run_dosage,
-        "comments": meta.comments,
-        "generated_timestamp": meta.generated_timestamp,
-        "rapid_mix_duration_min": kpi.rapid_mix_duration_min,
-        "flocculation_duration_min": kpi.flocculation_duration_min,
-        "settling_duration_min": kpi.settling_duration_min,
-        "growth_rate_um_per_min": kpi.growth_rate_um_per_min,
-        "growth_rate_r2": kpi.growth_rate_r2,
-        "growth_rate_window": kpi.growth_rate_window,
-        "pre_settle_diameter_um": kpi.pre_settle_diameter_um,
-        "plateau_mean_um": kpi.plateau_mean_um,
-        "plateau_cv": kpi.plateau_cv,
-        "settle_baseline_vol_conc": kpi.settle_baseline_vol_conc,
-        "t50_min": kpi.t50_min,
-        "t10_min": kpi.t10_min,
-        "time_to_thresholds_min": {str(k): v for k, v in kpi.time_to_thresholds_min.items()},
-        "score": kpi.score,
-        "score_components": kpi.score_components,
-        "score_reason": kpi.score_reason,
-        "quality_flags": kpi.quality_flags,
-    }
-    return d
 
 
 def _fig_to_png(fig, width=900, height=400):

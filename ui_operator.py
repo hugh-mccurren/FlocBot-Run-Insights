@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
 import re as _re
@@ -53,10 +52,11 @@ _PHASE_SUBTITLES = {
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Plant baseline storage
+# Plant baseline storage (Supabase DB)
 # ═══════════════════════════════════════════════════════════════════════════
 
-_BASELINES_DIR = Path(__file__).parent / "baselines"
+import supabase_client as _db
+import streamlit as _st
 
 
 @dataclass
@@ -76,23 +76,27 @@ class PlantBaseline:
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 
-def _baseline_path(protocol: str) -> Path:
-    safe = _re.sub(r'[^\w\s\-()]', '', protocol).strip().replace(' ', '_')
-    return _BASELINES_DIR / f"{safe}.json"
+def _get_auth():
+    """Get access_token and user_id from Streamlit session_state."""
+    user = _st.session_state.get("user", {})
+    return user.get("access_token", ""), user.get("id", "")
 
 
 def save_baseline(protocol: str, baseline: PlantBaseline) -> None:
-    _BASELINES_DIR.mkdir(exist_ok=True)
-    path = _baseline_path(protocol)
-    path.write_text(json.dumps(baseline.to_dict(), indent=2))
+    token, user_id = _get_auth()
+    if not token:
+        return
+    _db.save_baseline(token, user_id, protocol, baseline.to_dict())
 
 
 def load_baseline(protocol: str) -> Optional[PlantBaseline]:
-    path = _baseline_path(protocol)
-    if not path.exists():
+    token, _ = _get_auth()
+    if not token:
         return None
     try:
-        data = json.loads(path.read_text())
+        data = _db.get_baseline(token, protocol)
+        if data is None:
+            return None
         return PlantBaseline.from_dict(data)
     except Exception:
         return None
@@ -1172,22 +1176,4 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
         md_table += "\n".join(f"| {k} | {v} |" for k, v in md_rows)
         st.markdown(md_table)
 
-    # ── F) Save as plant baseline ──
-    protocol = meta.protocol_title or ""
-    if protocol:
-        with st.expander("Plant Baseline", expanded=False):
-            existing_bl = load_baseline(protocol)
-            if existing_bl:
-                st.caption(f"Baseline exists for **{protocol}**")
-                bl_items = []
-                if existing_bl.growth_rate_um_per_min is not None:
-                    bl_items.append(f"Growth: {existing_bl.growth_rate_um_per_min:.0f} \u00b5m/min")
-                if existing_bl.pre_settle_diameter_um is not None:
-                    bl_items.append(f"Pre-settle: {existing_bl.pre_settle_diameter_um:.0f} \u00b5m")
-                if existing_bl.t50_min is not None:
-                    bl_items.append(f"t50: {existing_bl.t50_min:.1f} min")
-                st.caption(" \u2022 ".join(bl_items) if bl_items else "No values stored")
-            if st.button("Save this run as baseline", key="op_save_baseline"):
-                save_baseline_from_kpi(protocol, kpi)
-                st.success(f"Baseline saved for {protocol}")
-                st.rerun()
+    # Plant baseline is now managed from the sidebar, not here.
