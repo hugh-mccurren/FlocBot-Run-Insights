@@ -2,5 +2,6 @@
 __pycache__/
 *.pyc
 .streamlit/secrets.toml
+.env
 nul
 flocbot_run_insights_source.txt

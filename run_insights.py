@@ -7,7 +7,11 @@ import io
 import json
 from datetime import datetime
 import streamlit as st
+from dotenv import load_dotenv
 from metric_help import METRIC_HELP, classify_flag
+
+# ─── Load environment variables (.env in local dev, Render env in prod) ───
+load_dotenv()
 
 # ─── Keep-alive (lightweight, no heavy deps) ─────────────────────────────
 import keep_alive
@@ -336,6 +340,87 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Authentication gate — must log in before accessing the app
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _show_auth_page():
+    """Render login / signup form. Returns True if user is now authenticated."""
+    import supabase_client as auth
+
+    # Already logged in?
+    if st.session_state.get("user"):
+        return True
+
+    st.markdown('<div class="header-accent"></div>', unsafe_allow_html=True)
+    st.markdown("## FlocBot Run Insights")
+    st.caption("Sign in to analyze your RoboJar flocculation data.")
+
+    tab_login, tab_signup = st.tabs(["Sign In", "Create Account"])
+
+    with tab_login:
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Password", type="password", key="login_password")
+        if st.button("Sign In", use_container_width=True, type="primary"):
+            if not email or not password:
+                st.error("Please enter both email and password.")
+            else:
+                try:
+                    data = auth.sign_in(email, password)
+                    st.session_state["user"] = {
+                        "id": data["user"]["id"],
+                        "email": data["user"]["email"],
+                        "access_token": data["access_token"],
+                    }
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Login failed: {e}")
+
+    with tab_signup:
+        new_email = st.text_input("Email", key="signup_email")
+        new_password = st.text_input("Password", type="password", key="signup_password")
+        confirm_password = st.text_input("Confirm Password", type="password", key="signup_confirm")
+        if st.button("Create Account", use_container_width=True):
+            if not new_email or not new_password:
+                st.error("Please fill in all fields.")
+            elif new_password != confirm_password:
+                st.error("Passwords do not match.")
+            elif len(new_password) < 6:
+                st.error("Password must be at least 6 characters.")
+            else:
+                try:
+                    data = auth.sign_up(new_email, new_password)
+                    if data.get("user") and data["user"].get("identities"):
+                        st.success("Account created! You can now sign in.")
+                    else:
+                        st.info("Check your email to confirm your account, then sign in.")
+                except Exception as e:
+                    st.error(f"Signup failed: {e}")
+
+    return False
+
+
+if not _show_auth_page():
+    st.stop()
+
+# ─── Logout button (shown in sidebar when logged in) ─────────────────────
+def _add_logout_button():
+    """Add logout to the bottom of the sidebar."""
+    with st.sidebar:
+        st.markdown("---")
+        user_email = st.session_state["user"]["email"]
+        st.caption(f"Signed in as **{user_email}**")
+        if st.button("Sign Out", use_container_width=True):
+            import supabase_client as auth
+            try:
+                auth.sign_out(st.session_state["user"]["access_token"])
+            except Exception:
+                pass
+            st.session_state.pop("user", None)
+            st.rerun()
+
+_add_logout_button()
 
 PHASE_COLORS = {
     "rapid_mix": "rgba(239, 68, 68, 0.08)",
