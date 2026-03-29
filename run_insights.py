@@ -1718,7 +1718,7 @@ with root.container():
         with col_csv:
             csv_buf = summary_df.to_csv(index=False)
             st.download_button(
-                "Download summary_table.csv",
+                "Download summary table.csv",
                 csv_buf,
                 file_name="summary_table.csv",
                 mime="text/csv",
@@ -1729,7 +1729,7 @@ with root.container():
             all_kpis = [kpi_to_dict(r["meta"], r["kpi"]) for r in runs]
             json_buf = json.dumps(all_kpis, indent=2, default=str)
             st.download_button(
-                "Download all_runs.json",
+                "Download all runs.json",
                 json_buf,
                 file_name="all_runs.json",
                 mime="application/json",
@@ -1744,7 +1744,7 @@ with root.container():
                 st.warning(f"PDF generation failed: {e}")
             if pdf_bytes:
                 st.download_button(
-                    "Download report.pdf",
+                    "Download report pdf",
                     pdf_bytes,
                     file_name="report.pdf",
                     mime="application/pdf",
