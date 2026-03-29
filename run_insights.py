@@ -1157,24 +1157,14 @@ def build_summary_row(meta, kpi):
 
 
 def _fig_to_png(fig, width=900, height=400):
-    """Render a Plotly figure to PNG bytes via kaleido, with graceful fallback."""
+    """Render a Plotly figure to PNG bytes via kaleido. Returns None on failure."""
+    import sys
+    if sys.platform == "win32":
+        return None
     try:
         return fig.to_image(format="png", width=width, height=height, scale=2)
     except Exception:
-        # kaleido unavailable or broken — return a 1x1 transparent PNG placeholder
-        import struct, zlib
-        def _minimal_png():
-            sig = b'\x89PNG\r\n\x1a\n'
-            ihdr_data = struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)
-            ihdr_crc = zlib.crc32(b'IHDR' + ihdr_data) & 0xffffffff
-            ihdr = struct.pack('>I', 13) + b'IHDR' + ihdr_data + struct.pack('>I', ihdr_crc)
-            raw = zlib.compress(b'\x00\x00\x00\x00')
-            idat_crc = zlib.crc32(b'IDAT' + raw) & 0xffffffff
-            idat = struct.pack('>I', len(raw)) + b'IDAT' + raw + struct.pack('>I', idat_crc)
-            iend_crc = zlib.crc32(b'IEND') & 0xffffffff
-            iend = struct.pack('>I', 0) + b'IEND' + struct.pack('>I', iend_crc)
-            return sig + ihdr + idat + iend
-        return _minimal_png()
+        return None
 
 
 def _pdf_safe(text):
@@ -1258,36 +1248,55 @@ def _pdf_add_run(pdf, run, thresholds_to_show, chart_w=190):
     pdf.ln(4)
 
     # ── Charts ──
-    pdf.set_font("Helvetica", "B", 11)
-    pdf.set_text_color(30, 41, 59)
-    pdf.cell(0, 7, "Charts", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(1)
+    has_charts = False
 
     # Diameter chart
     fig_diam = plot_diameter(df, phases, kpi, meta.short_label, thresholds_to_show)
     fig_diam.update_layout(height=380, margin=dict(t=80, b=40, l=50, r=20))
     png_diam = _fig_to_png(fig_diam, width=900, height=380)
-    img_diam = io.BytesIO(png_diam)
-    img_diam.name = "diameter.png"
-    pdf.image(img_diam, x=10, w=chart_w)
-    pdf.ln(3)
+    if png_diam:
+        if not has_charts:
+            pdf.set_font("Helvetica", "B", 11)
+            pdf.set_text_color(30, 41, 59)
+            pdf.cell(0, 7, "Charts", new_x="LMARGIN", new_y="NEXT")
+            pdf.ln(1)
+            has_charts = True
+        img_diam = io.BytesIO(png_diam)
+        img_diam.name = "diameter.png"
+        pdf.image(img_diam, x=10, w=chart_w)
+        pdf.ln(3)
 
     # Vol conc chart (new page if needed)
     if "vol_conc_mm3_L" in df.columns:
-        if pdf.get_y() > 200:
-            pdf.add_page()
         fig_vc = plot_vol_conc(df, phases, kpi, meta.short_label)
         fig_vc.update_layout(height=380, margin=dict(t=80, b=40, l=50, r=20))
         png_vc = _fig_to_png(fig_vc, width=900, height=380)
-        img_vc = io.BytesIO(png_vc)
-        img_vc.name = "volconc.png"
-        pdf.image(img_vc, x=10, w=chart_w)
+        if png_vc:
+            if not has_charts:
+                pdf.set_font("Helvetica", "B", 11)
+                pdf.set_text_color(30, 41, 59)
+                pdf.cell(0, 7, "Charts", new_x="LMARGIN", new_y="NEXT")
+                pdf.ln(1)
+                has_charts = True
+            if pdf.get_y() > 200:
+                pdf.add_page()
+            img_vc = io.BytesIO(png_vc)
+            img_vc.name = "volconc.png"
+            pdf.image(img_vc, x=10, w=chart_w)
+
+
+class _ReportPDF(FPDF):
+    def footer(self):
+        self.set_y(-12)
+        self.set_font("Helvetica", "I", 7)
+        self.set_text_color(148, 163, 184)
+        self.cell(0, 5, "FlocBot Run Insights  |  Research / sample-based output. For evaluation purposes only.", align="C")
 
 
 def generate_pdf(all_runs, thresholds_to_show):
     """Build a multi-page PDF report for all uploaded runs and return bytes."""
 
-    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf = _ReportPDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=20)
     pdf.add_page()
 
@@ -1313,12 +1322,6 @@ def generate_pdf(all_runs, thresholds_to_show):
         if run_i > 0:
             pdf.add_page()
         _pdf_add_run(pdf, run, thresholds_to_show, chart_w)
-
-    # Footer on last page
-    pdf.set_y(-15)
-    pdf.set_font("Helvetica", "I", 7)
-    pdf.set_text_color(148, 163, 184)  # #94A3B8
-    pdf.cell(0, 5, "FlocBot Run Insights  |  Research / sample-based output. For evaluation purposes only.", align="C")
 
     return bytes(pdf.output())
 
