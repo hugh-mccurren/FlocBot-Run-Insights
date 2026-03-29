@@ -338,6 +338,15 @@ st.markdown("""
     .welcome-card h2 {
         margin-top: 0;
     }
+    /* Make text inputs more visible on light background */
+    .stTextInput input {
+        border: 1px solid #c0c8d0 !important;
+        background: #f8f9fb !important;
+    }
+    .stTextInput input:focus {
+        border-color: #0284c7 !important;
+        background: #ffffff !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -355,7 +364,7 @@ def _show_auth_page():
 
     st.markdown('<div class="header-accent"></div>', unsafe_allow_html=True)
     st.markdown("## FlocBot Run Insights")
-    st.caption("Sign in to analyze your RoboJar flocculation data.")
+    st.caption("Sign in to analyze your RoboJar data.")
 
     tab_login, tab_signup = st.tabs(["Sign In", "Create Account"])
 
