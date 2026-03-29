@@ -338,14 +338,21 @@ st.markdown("""
     .welcome-card h2 {
         margin-top: 0;
     }
-    /* Make text inputs more visible on light background */
-    .stTextInput input {
+    /* Consistent input styling */
+    .stTextInput [data-testid="stTextInputRootElement"] {
         border: 1px solid #c0c8d0 !important;
-        background: #f8f9fb !important;
+        border-radius: 6px !important;
+        background-color: #f8f9fb !important;
+        overflow: hidden !important;
     }
-    .stTextInput input:focus {
+    .stTextInput [data-testid="stTextInputRootElement"]:focus-within {
         border-color: #0284c7 !important;
-        background: #ffffff !important;
+        background-color: #ffffff !important;
+    }
+    .stTextInput [data-testid="stTextInputRootElement"] * {
+        border: none !important;
+        background-color: inherit !important;
+        box-shadow: none !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -492,7 +499,7 @@ with st.sidebar:
 
     # ── Plant Baseline ──
     st.markdown("---")
-    st.markdown("### Plant Baseline")
+    st.subheader("Plant Baseline")
 
     # Helper: save a run as baseline
     def _save_baseline_from_run(run_meta):
@@ -542,7 +549,7 @@ with st.sidebar:
 
         # ── STATE 3: Change baseline (toggle) ──
         if not st.session_state.get("_bl_changing"):
-            if st.button("Change Baseline", key="bl_change_toggle", type="tertiary"):
+            if st.button("Change Baseline", key="bl_change_toggle"):
                 st.session_state["_bl_changing"] = True
                 st.session_state.pop("_confirm_baseline", None)
                 st.rerun()
@@ -611,7 +618,7 @@ with st.sidebar:
 
     # ── Run Library ──
     st.markdown("---")
-    st.markdown("### Run Library")
+    st.subheader("Run Library")
 
     # Initialize selected set — newly uploaded runs get added here automatically
     if "selected_run_ids" not in st.session_state:
@@ -671,20 +678,21 @@ with st.sidebar:
     else:
         st.caption("No past runs saved yet.")
 
-    st.markdown("---")
-
     # ── Mode selector ──
     # Handle pending mode-switch request (from Operator Mode button)
     if st.session_state.get("_switch_to_advanced"):
-        st.session_state["app_mode"] = "Advanced (Full)"
+        st.session_state["app_mode"] = "Advanced"
         del st.session_state["_switch_to_advanced"]
     if "app_mode" not in st.session_state:
-        st.session_state["app_mode"] = "Operator (Simple)"
+        st.session_state["app_mode"] = "Operator"
+    st.markdown("---")
+    st.subheader("Dashboard Mode")
     app_mode = st.radio(
         "Dashboard Mode",
-        ["Operator (Simple)", "Advanced (Full)"],
+        ["Operator", "Advanced"],
         key="app_mode",
-        help="Operator Mode shows a simplified traffic-light view. Advanced Mode shows full controls and tables.",
+        label_visibility="collapsed",
+        help="Operator shows a simplified traffic-light view. Advanced shows full controls and tables.",
     )
 
     # ── Advanced-only sidebar controls ──
@@ -692,11 +700,11 @@ with st.sidebar:
     weights = None
     score_threshold = 300.0
 
-    if app_mode == "Advanced (Full)":
+    if app_mode == "Advanced":
         st.markdown("---")
 
         # ── Thresholds ──
-        st.markdown("### Diameter Thresholds")
+        st.subheader("Diameter Thresholds")
         default_thresholds = "250, 300, 350, 400, 450"
         threshold_str = st.text_input(
             "Thresholds (μm)",
@@ -990,7 +998,7 @@ root = st.empty()
 # Operator Mode (early exit – renders its own layout)
 # ═══════════════════════════════════════════════════════════════════════════
 
-if app_mode == "Operator (Simple)":
+if app_mode == "Operator":
     with root.container():
         from ui_operator import show_operator_mode
         show_operator_mode(

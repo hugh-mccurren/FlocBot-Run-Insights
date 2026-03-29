@@ -1103,7 +1103,7 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
     stages = [
         ("Floc Formation", formation, "Higher growth = stronger coagulation"),
         ("Floc Size", size, "Larger flocs usually settle faster"),
-        ("Settling", settling, "Informational only \u2013 not used in scoring"),
+        ("Settling", settling, "Faster settling = better clarifier performance"),
     ]
     for col, (name, stage, hint) in zip(cols, stages):
         with col:
