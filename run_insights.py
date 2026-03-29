@@ -1318,7 +1318,7 @@ def generate_pdf(all_runs, thresholds_to_show):
     pdf.set_y(-15)
     pdf.set_font("Helvetica", "I", 7)
     pdf.set_text_color(148, 163, 184)  # #94A3B8
-    pdf.cell(0, 5, "FlocBot Run Insights", align="C")
+    pdf.cell(0, 5, "FlocBot Run Insights  |  Research / sample-based output. For evaluation purposes only.", align="C")
 
     return bytes(pdf.output())
 
@@ -1341,6 +1341,14 @@ with root.container():
     st.markdown(f'## FlocBot Run Insights')
     st.caption(f'{len(runs)} run{"s" if len(runs) != 1 else ""} loaded')
     st.markdown('<div class="header-accent"></div>', unsafe_allow_html=True)
+
+    with st.expander("About This Tool", expanded=False):
+        st.markdown(
+            "FlocBot Run Insights is a research tool under active development. "
+            "Results are based on limited sample data and should be treated as "
+            "exploratory, not as standalone guidance. All outputs should be "
+            "independently verified before informing operational decisions."
+        )
 
     run_labels = [r["meta"].label for r in runs]
     chart_labels = [r["meta"].short_label for r in runs]

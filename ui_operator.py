@@ -997,6 +997,14 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
     st.caption(f'{len(runs)} run{"s" if len(runs) != 1 else ""} loaded \u2022 Operator Mode')
     st.markdown('<div class="header-accent"></div>', unsafe_allow_html=True)
 
+    with st.expander("About This Tool", expanded=False):
+        st.markdown(
+            "FlocBot Run Insights is a research tool under active development. "
+            "Results are based on limited sample data and should be treated as "
+            "exploratory, not as standalone guidance. All outputs should be "
+            "independently verified before informing operational decisions."
+        )
+
     # ── Multi-run comparison box ──
     if len(runs) >= 2:
         cmp = compare_runs(runs)
