@@ -965,7 +965,7 @@ OPERATOR_CSS = """
         margin-bottom: 8px;
     }
 
-    /* Secondary button style for "View advanced comparison" */
+    /* Secondary button style for "View detailed comparison" */
     .op-compare-panel + div button {
         background: transparent !important;
         border: 1px solid #CBD5E1 !important;
@@ -994,7 +994,7 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
 
     st.markdown(OPERATOR_CSS, unsafe_allow_html=True)
     st.markdown("## FlocBot Run Insights")
-    st.caption(f'{len(runs)} run{"s" if len(runs) != 1 else ""} loaded \u2022 Operator Mode')
+    st.caption(f'{len(runs)} run{"s" if len(runs) != 1 else ""} loaded \u2022 Summary Mode')
     st.markdown('<div class="header-accent"></div>', unsafe_allow_html=True)
 
     with st.expander("About This Tool", expanded=False):
@@ -1019,7 +1019,7 @@ def show_operator_mode(st, runs, go, phase_colors, phase_labels, chart_layout, p
         )
         def _go_advanced():
             st.session_state["_switch_to_advanced"] = True
-        st.button("View advanced comparison \u2192",
+        st.button("View detailed comparison \u2192",
                   key="op_switch_advanced", on_click=_go_advanced)
 
     # Show details for the best/only run

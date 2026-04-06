@@ -679,20 +679,20 @@ with st.sidebar:
         st.caption("No past runs saved yet.")
 
     # ── Mode selector ──
-    # Handle pending mode-switch request (from Operator Mode button)
+    # Handle pending mode-switch request (from Summary Mode button)
     if st.session_state.get("_switch_to_advanced"):
-        st.session_state["app_mode"] = "Advanced"
+        st.session_state["app_mode"] = "Detailed"
         del st.session_state["_switch_to_advanced"]
     if "app_mode" not in st.session_state:
-        st.session_state["app_mode"] = "Operator"
+        st.session_state["app_mode"] = "Summary"
     st.markdown("---")
     st.subheader("Dashboard Mode")
     app_mode = st.radio(
         "Dashboard Mode",
-        ["Operator", "Advanced"],
+        ["Summary", "Detailed"],
         key="app_mode",
         label_visibility="collapsed",
-        help="Operator shows a simplified traffic-light view. Advanced shows full controls and tables.",
+        help="Summary shows a simplified traffic-light view. Detailed shows full controls and tables.",
     )
 
     # ── Advanced-only sidebar controls ──
@@ -700,7 +700,7 @@ with st.sidebar:
     weights = None
     score_threshold = 300.0
 
-    if app_mode == "Advanced":
+    if app_mode == "Detailed":
         st.markdown("---")
 
         # ── Thresholds ──
@@ -727,7 +727,7 @@ with st.sidebar:
         st.markdown("---")
 
         # ── Scoring weights (collapsed) ──
-        with st.expander("Advanced: Scoring Weights", expanded=False):
+        with st.expander("Scoring Weights", expanded=False):
             st.caption("Adjust relative importance of each metric.")
             w_time = st.slider("Time to threshold", 0, 100, 30, key="w1")
             w_diam = st.slider("Pre-settle diameter", 0, 100, 30, key="w2")
@@ -858,7 +858,7 @@ if not st.session_state.get("selected_run_ids"):
         </p>
         <ul style="color:#334155; line-height:2;">
             <li>Automatic phase detection (Rapid Mix / Flocculation / Settling)</li>
-            <li>Operator-relevant KPIs and an overall run score</li>
+            <li>Key performance indicators and an overall run score</li>
             <li>Interactive Plotly charts with phase shading</li>
             <li>Multi-run comparison with side-by-side metrics</li>
             <li>CSV / JSON / PDF export for reporting</li>
@@ -995,10 +995,10 @@ if not runs:
 root = st.empty()
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Operator Mode (early exit – renders its own layout)
+# Summary Mode (early exit – renders its own layout)
 # ═══════════════════════════════════════════════════════════════════════════
 
-if app_mode == "Operator":
+if app_mode == "Summary":
     with root.container():
         from ui_operator import show_operator_mode
         show_operator_mode(
