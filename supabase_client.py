@@ -197,3 +197,44 @@ def get_baseline(access_token: str, protocol: str) -> dict | None:
     if not data:
         return None
     return data[0]["baseline_json"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# User preferences (PostgREST) — upsert by user_id
+# ═══════════════════════════════════════════════════════════════════════════
+
+def save_preferences(access_token: str, user_id: str,
+                     prefs: dict) -> None:
+    """Upsert user preferences. Overwrites if row already exists."""
+    resp = httpx.post(
+        f"{_REST_BASE}/user_preferences",
+        headers=_auth_headers(access_token) | {
+            "Prefer": "resolution=merge-duplicates",
+        },
+        params={"on_conflict": "user_id"},
+        json={
+            "user_id": user_id,
+            "preferences": prefs,
+        },
+        timeout=10,
+    )
+    if resp.status_code >= 400:
+        data = resp.json()
+        msg = data.get("message") or data.get("msg") or str(data)
+        raise Exception(msg)
+
+
+def get_preferences(access_token: str) -> dict | None:
+    """Fetch preferences for the current user. Returns dict or None."""
+    resp = httpx.get(
+        f"{_REST_BASE}/user_preferences",
+        headers=_auth_headers(access_token),
+        params={"select": "preferences"},
+        timeout=10,
+    )
+    data = resp.json()
+    if resp.status_code >= 400:
+        return None
+    if not data:
+        return None
+    return data[0]["preferences"]

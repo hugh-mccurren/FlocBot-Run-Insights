@@ -495,6 +495,24 @@ with st.sidebar:
         except Exception:
             st.session_state["past_runs_meta"] = []
 
+    # Load saved user preferences (scoring weights) once per session
+    if "prefs_loaded" not in st.session_state:
+        st.session_state["prefs_loaded"] = True
+        try:
+            prefs = _db.get_preferences(st.session_state["user"]["access_token"])
+            if prefs:
+                weights_pref = prefs.get("scoring_weights", {})
+                if "w1" in weights_pref:
+                    st.session_state["w1"] = weights_pref["w1"]
+                if "w2" in weights_pref:
+                    st.session_state["w2"] = weights_pref["w2"]
+                if "w3" in weights_pref:
+                    st.session_state["w3"] = weights_pref["w3"]
+                if "w4" in weights_pref:
+                    st.session_state["w4"] = weights_pref["w4"]
+        except Exception:
+            pass  # preferences table may not exist yet; use defaults
+
     _past_meta = st.session_state["past_runs_meta"]
 
     # ── Plant Baseline ──
@@ -744,10 +762,18 @@ with st.sidebar:
                     help="Which diameter threshold to use for the time-to-threshold score component.",
                 )
 
-            if st.button("Reset defaults", use_container_width=True):
-                for key in ["w1", "w2", "w3", "w4"]:
-                    st.session_state.pop(key, None)
-                st.rerun()
+        # Persist scoring weights to Supabase when they change
+        _current_weights = {"w1": w_time, "w2": w_diam, "w3": w_cv, "w4": w_t50}
+        if st.session_state.get("_saved_weights") != _current_weights:
+            st.session_state["_saved_weights"] = _current_weights
+            try:
+                user = st.session_state["user"]
+                _db.save_preferences(
+                    user["access_token"], user["id"],
+                    {"scoring_weights": _current_weights},
+                )
+            except Exception:
+                pass  # silent — don't break UX if save fails
 
         total_w = w_time + w_diam + w_cv + w_t50
         if total_w == 0:
