@@ -749,7 +749,7 @@ with st.sidebar:
             st.caption("Adjust relative importance of each metric.")
             w_time = st.slider("Time to threshold", 0, 100, 30, key="w1")
             w_diam = st.slider("Pre-settle diameter", 0, 100, 30, key="w2")
-            w_cv = st.slider("Plateau stability (CV)", 0, 100, 20, key="w3")
+            w_cv = st.slider("Signal noise", 0, 100, 20, key="w3")
             w_t50 = st.slider("Settling t50", 0, 100, 20, key="w4")
 
             score_threshold = 300.0
@@ -781,7 +781,7 @@ with st.sidebar:
         weights = {
             "time_to_300": w_time / total_w,
             "pre_settle_diameter": w_diam / total_w,
-            "plateau_cv": w_cv / total_w,
+            "floc_noise_mad": w_cv / total_w,
             "settling_t50": w_t50 / total_w,
         }
 
@@ -833,7 +833,7 @@ if uploaded_files:
                         "growth_rate_window": kpi.growth_rate_window,
                         "pre_settle_diameter_um": kpi.pre_settle_diameter_um,
                         "plateau_mean_um": kpi.plateau_mean_um,
-                        "plateau_cv": kpi.plateau_cv,
+                        "floc_noise_mad": kpi.floc_noise_mad,
                         "settle_baseline_vol_conc": kpi.settle_baseline_vol_conc,
                         "t50_min": kpi.t50_min,
                         "t10_min": kpi.t10_min,
@@ -941,7 +941,7 @@ def kpi_to_dict(meta, kpi):
         "growth_rate_window": kpi.growth_rate_window,
         "pre_settle_diameter_um": kpi.pre_settle_diameter_um,
         "plateau_mean_um": kpi.plateau_mean_um,
-        "plateau_cv": kpi.plateau_cv,
+        "floc_noise_mad": kpi.floc_noise_mad,
         "settle_baseline_vol_conc": kpi.settle_baseline_vol_conc,
         "t50_min": kpi.t50_min,
         "t10_min": kpi.t10_min,
@@ -1172,7 +1172,7 @@ def build_summary_row(meta, kpi):
         "Growth Rate (μm/min)": kpi.growth_rate_um_per_min,
         "Pre-settle Ø (μm)": kpi.pre_settle_diameter_um,
         "Plateau Mean (μm)": kpi.plateau_mean_um,
-        "Plateau CV (%)": kpi.plateau_cv,
+        "Signal Noise (μm)": kpi.floc_noise_mad,
         "t50 (min)": kpi.t50_min,
         "t10 (min)": kpi.t10_min,
         "Score": kpi.score,
@@ -1247,7 +1247,7 @@ def _pdf_add_run(pdf, run, thresholds_to_show, chart_w=190):
         ("Growth Rate", f"{kpi.growth_rate_um_per_min} \u00b5m/min" if kpi.growth_rate_um_per_min else "N/A"),
         ("Pre-settle O", f"{kpi.pre_settle_diameter_um} \u00b5m" if kpi.pre_settle_diameter_um else "N/A"),
         ("Plateau Mean", f"{kpi.plateau_mean_um} \u00b5m" if kpi.plateau_mean_um else "N/A"),
-        ("Plateau CV", f"{kpi.plateau_cv}%" if kpi.plateau_cv else "N/A"),
+        ("Signal Noise", f"{kpi.floc_noise_mad} \u00b5m" if kpi.floc_noise_mad else "N/A"),
         ("Settling t50", f"{kpi.t50_min} min" if kpi.t50_min else "N/A"),
         ("Settling t10", f"{kpi.t10_min} min" if kpi.t10_min else "N/A"),
         ("Rapid Mix", f"{kpi.rapid_mix_duration_min:.1f} min" if kpi.rapid_mix_duration_min else "N/A"),
@@ -1409,7 +1409,7 @@ with root.container():
                 f"| **Growth Rate** | {METRIC_HELP['growth_rate']['short']} | {METRIC_HELP['growth_rate']['good']} |\n"
                 f"| **Pre-settle Ø** | {METRIC_HELP['pre_settle_diameter']['short']} | {METRIC_HELP['pre_settle_diameter']['good']} |\n"
                 f"| **Settling t50** | {METRIC_HELP['settling_t50']['short']} | {METRIC_HELP['settling_t50']['good']} |\n"
-                f"| **Plateau CV** | {METRIC_HELP['plateau_cv']['short']} | {METRIC_HELP['plateau_cv']['good']} |\n"
+                f"| **Signal Noise** | {METRIC_HELP['floc_noise_mad']['short']} | {METRIC_HELP['floc_noise_mad']['good']} |\n"
                 f"| **Threshold times** | {METRIC_HELP['time_to_threshold']['short']} | {METRIC_HELP['time_to_threshold']['good']} |\n"
             )
 
@@ -1471,8 +1471,8 @@ with root.container():
                            help=METRIC_HELP["flocculation_duration"]["short"])
                 c7.metric("Settling", f"{kpi.settling_duration_min:.1f} min" if kpi.settling_duration_min else "N/A",
                            help=METRIC_HELP["settling_duration"]["short"])
-                c8.metric("Plateau CV", f"{kpi.plateau_cv}%" if kpi.plateau_cv else "N/A",
-                           help=METRIC_HELP["plateau_cv"]["short"])
+                c8.metric("Signal Noise", f"{kpi.floc_noise_mad} μm" if kpi.floc_noise_mad else "N/A",
+                           help=METRIC_HELP["floc_noise_mad"]["short"])
 
                 # Row 3: Floc Growth Milestones
                 if thresholds:
@@ -1507,7 +1507,7 @@ with root.container():
                 "Chemistry": st.column_config.TextColumn(width="small"),
                 "Dosage": st.column_config.TextColumn(width="small"),
                 "Plateau Mean (μm)": st.column_config.NumberColumn(width="small"),
-                "Plateau CV (%)": st.column_config.NumberColumn(width="small"),
+                "Signal Noise (μm)": st.column_config.NumberColumn(width="small"),
                 "Pre-settle Ø (μm)": st.column_config.NumberColumn(width="small"),
             },
         )
@@ -1542,7 +1542,7 @@ with root.container():
                 ("Score", ka.score, kb.score, "/100", True),
                 ("Growth Rate", ka.growth_rate_um_per_min, kb.growth_rate_um_per_min, " μm/min", True),
                 ("Pre-settle Ø", ka.pre_settle_diameter_um, kb.pre_settle_diameter_um, " μm", True),
-                ("Plateau CV", ka.plateau_cv, kb.plateau_cv, "%", False),
+                ("Signal Noise", ka.floc_noise_mad, kb.floc_noise_mad, " μm", False),
                 ("Settling t50", ka.t50_min, kb.t50_min, " min", False),
                 ("Settling t90", ka.t10_min, kb.t10_min, " min", False),
             ]

@@ -116,7 +116,7 @@ class RunKPIs:
 
     pre_settle_diameter_um: Optional[float] = None
     plateau_mean_um: Optional[float] = None
-    plateau_cv: Optional[float] = None
+    floc_noise_mad: Optional[float] = None  # MAD of first differences over flocculation phase (µm)
 
     settle_baseline_vol_conc: Optional[float] = None
     t50_min: Optional[float] = None
@@ -206,14 +206,21 @@ def compute_kpis(
         if len(seg) > 0:
             kpi.pre_settle_diameter_um = round(seg.mean(), 1)
 
-    # --- Plateau stats (last 3 min of flocculation) ---
+    # --- Plateau mean (last 3 min of flocculation) ---
     if has_diameter and fl:
         plat_start = max(fl.start_min, fl.end_min - 3.0)
         mask = (df["time_min"] >= plat_start) & (df["time_min"] <= fl.end_min)
         seg = df.loc[mask, "diameter_um"].dropna()
         if len(seg) > 0:
             kpi.plateau_mean_um = round(seg.mean(), 1)
-            kpi.plateau_cv = round(seg.std() / seg.mean() * 100, 1) if seg.mean() > 0 else None
+
+    # --- Floc noise: MAD of first differences over full flocculation phase ---
+    if has_diameter and fl:
+        fl_mask = (df["time_min"] >= fl.start_min) & (df["time_min"] <= fl.end_min)
+        fl_seg = df.loc[fl_mask, "diameter_um"].dropna()
+        if len(fl_seg) >= 2:
+            diffs = fl_seg.diff().dropna().abs()
+            kpi.floc_noise_mad = round(diffs.median(), 1)
 
     # --- Settling metrics (vol conc) ---
     if has_vol and se:
@@ -287,7 +294,7 @@ def _check_quality(df: pd.DataFrame, phases: list[Phase], kpi: RunKPIs):
 DEFAULT_WEIGHTS = {
     "time_to_300": 0.30,
     "pre_settle_diameter": 0.30,
-    "plateau_cv": 0.20,
+    "floc_noise_mad": 0.20,
     "settling_t50": 0.20,
 }
 
@@ -295,7 +302,7 @@ DEFAULT_WEIGHTS = {
 _NORM = {
     "time_to_300": (2.0, 20.0),      # min – lower is better
     "pre_settle_diameter": (100, 600),  # μm – higher is better
-    "plateau_cv": (1.0, 30.0),        # % – lower is better
+    "floc_noise_mad": (2.0, 30.0),     # µm – lower is better
     "settling_t50": (1.0, 15.0),      # min – lower is better
 }
 
@@ -329,13 +336,13 @@ def compute_score(
         components["pre_settle_diameter"] = None
         reasons.append("No pre-settle diameter")
 
-    # 3) plateau_cv (lower is better)
-    if kpi.plateau_cv is not None:
-        lo, hi = _NORM["plateau_cv"]
-        components["plateau_cv"] = _scale_lower_better(kpi.plateau_cv, lo, hi)
+    # 3) floc_noise_mad (lower is better)
+    if kpi.floc_noise_mad is not None:
+        lo, hi = _NORM["floc_noise_mad"]
+        components["floc_noise_mad"] = _scale_lower_better(kpi.floc_noise_mad, lo, hi)
     else:
-        components["plateau_cv"] = None
-        reasons.append("No plateau CV")
+        components["floc_noise_mad"] = None
+        reasons.append("No floc noise MAD")
 
     # 4) settling t50 (lower is better)
     if kpi.t50_min is not None:

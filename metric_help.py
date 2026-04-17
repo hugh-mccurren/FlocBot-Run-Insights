@@ -14,7 +14,7 @@ METRIC_HELP = {
         "short": "Weighted composite score (0–100) combining growth speed, floc size, stability, and settling.",
         "detail": (
             "The overall score combines four sub-metrics into a single 0–100 number: "
-            "time to reach 300 μm (30%), pre-settle diameter (30%), plateau CV (20%), "
+            "time to reach 300 μm (30%), pre-settle diameter (30%), signal noise (20%), "
             "and settling t50 (20%). Higher is better. If any sub-metric is unavailable, "
             "the remaining weights are re-normalized."
         ),
@@ -86,15 +86,18 @@ METRIC_HELP = {
         ),
         "good": "Usually 5–15 min. Longer allows more complete settling.",
     },
-    "plateau_cv": {
-        "label": "Plateau CV",
-        "short": "Coefficient of variation of diameter in the last 3 min of flocculation (%).",
+    "floc_noise_mad": {
+        "label": "Signal Noise",
+        "short": "Typical reading-to-reading jump in floc size during flocculation (μm). Lower = steadier signal.",
         "detail": (
-            "Measures how stable the floc size is near the end of flocculation. "
-            "Low CV means the diameter has plateaued; high CV means it's still "
-            "fluctuating or breaking apart."
+            "Measures how much the particle size reading jumps around between consecutive "
+            "measurements during flocculation. Calculated as the median absolute difference "
+            "between successive diameter readings (MAD of first differences). "
+            "A low number means the sensor is seeing a smooth, consistent signal. "
+            "A high number means the readings are erratic — which can make it harder to "
+            "trust the growth rate or spot real changes in floc behaviour."
         ),
-        "good": "Lower is better — under 5% is very stable.",
+        "good": "Lower is better — under 10 μm is a clean signal; above 25 μm is very noisy.",
     },
     "time_to_threshold": {
         "label": "Time to threshold",
