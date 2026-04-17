@@ -500,6 +500,7 @@ with st.sidebar:
     # Load saved user preferences (scoring weights) once per session
     if "prefs_loaded" not in st.session_state:
         st.session_state["prefs_loaded"] = True
+        st.session_state["_prefs_debug"] = "loading..."
         try:
             prefs = _db.get_preferences(st.session_state["user"]["access_token"])
             if prefs:
@@ -514,8 +515,13 @@ with st.sidebar:
                     st.session_state["w4"] = weights_pref["w4"]
                 if "threshold_str" in prefs:
                     st.session_state["threshold_str"] = prefs["threshold_str"]
-        except Exception:
-            pass  # preferences table may not exist yet; use defaults
+                st.session_state["_prefs_debug"] = f"loaded: {prefs}"
+            else:
+                st.session_state["_prefs_debug"] = "loaded: nothing in DB yet"
+        except Exception as _e:
+            st.session_state["_prefs_debug"] = f"load ERROR: {_e}"
+
+    st.caption(f"🔧 v5 | prefs: {st.session_state.get('_prefs_debug', 'not run yet')}")
 
     _past_meta = st.session_state["past_runs_meta"]
 
@@ -779,8 +785,8 @@ with st.sidebar:
                     user["access_token"], user["id"],
                     {"scoring_weights": _current_weights, "threshold_str": _current_threshold_str},
                 )
-            except Exception:
-                pass  # silent — don't break UX if save fails
+            except Exception as _save_err:
+                st.session_state["_prefs_debug"] = f"save ERROR: {_save_err}"
 
         total_w = w_time + w_diam + w_cv + w_t50
         if total_w == 0:
