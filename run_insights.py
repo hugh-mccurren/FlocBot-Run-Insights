@@ -510,6 +510,8 @@ with st.sidebar:
                     st.session_state["w3"] = weights_pref["w3"]
                 if "w4" in weights_pref:
                     st.session_state["w4"] = weights_pref["w4"]
+                if "threshold_str" in prefs:
+                    st.session_state["threshold_str"] = prefs["threshold_str"]
         except Exception:
             pass  # preferences table may not exist yet; use defaults
 
@@ -727,6 +729,7 @@ with st.sidebar:
         threshold_str = st.text_input(
             "Thresholds (μm)",
             default_thresholds,
+            key="threshold_str",
             help="Comma-separated diameter values for time-to-threshold metrics.",
         )
         st.caption("Comma-separated values in μm.")
@@ -762,15 +765,17 @@ with st.sidebar:
                     help="Which diameter threshold to use for the time-to-threshold score component.",
                 )
 
-        # Persist scoring weights to Supabase when they change
+        # Persist scoring weights + thresholds to Supabase when they change
         _current_weights = {"w1": w_time, "w2": w_diam, "w3": w_cv, "w4": w_t50}
-        if st.session_state.get("_saved_weights") != _current_weights:
-            st.session_state["_saved_weights"] = _current_weights
+        _current_threshold_str = st.session_state.get("threshold_str", "250, 300, 350, 400, 450")
+        _prefs_snapshot = (_current_weights, _current_threshold_str)
+        if st.session_state.get("_saved_prefs_snapshot") != _prefs_snapshot:
+            st.session_state["_saved_prefs_snapshot"] = _prefs_snapshot
             try:
                 user = st.session_state["user"]
                 _db.save_preferences(
                     user["access_token"], user["id"],
-                    {"scoring_weights": _current_weights},
+                    {"scoring_weights": _current_weights, "threshold_str": _current_threshold_str},
                 )
             except Exception:
                 pass  # silent — don't break UX if save fails
