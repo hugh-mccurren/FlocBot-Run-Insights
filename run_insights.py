@@ -433,7 +433,9 @@ def _add_logout_button():
                 auth.sign_out(st.session_state["user"]["access_token"])
             except Exception:
                 pass
-            st.session_state.pop("user", None)
+            for _k in ["user", "prefs_loaded", "_saved_prefs_snapshot",
+                       "past_runs_meta", "loaded_runs_cache", "selected_run_ids"]:
+                st.session_state.pop(_k, None)
             st.rerun()
 
 _add_logout_button()
@@ -512,10 +514,8 @@ with st.sidebar:
                     st.session_state["w4"] = weights_pref["w4"]
                 if "threshold_str" in prefs:
                     st.session_state["threshold_str"] = prefs["threshold_str"]
-            else:
-                st.warning(f"[DEBUG] Prefs loaded but empty: {prefs!r}")
-        except Exception as _pref_err:
-            st.warning(f"[DEBUG] Prefs load error: {_pref_err}")
+        except Exception:
+            pass  # preferences table may not exist yet; use defaults
 
     _past_meta = st.session_state["past_runs_meta"]
 
@@ -779,8 +779,8 @@ with st.sidebar:
                     user["access_token"], user["id"],
                     {"scoring_weights": _current_weights, "threshold_str": _current_threshold_str},
                 )
-            except Exception as _save_err:
-                st.warning(f"[DEBUG] Prefs save error: {_save_err}")
+            except Exception:
+                pass  # silent — don't break UX if save fails
 
         total_w = w_time + w_diam + w_cv + w_t50
         if total_w == 0:
