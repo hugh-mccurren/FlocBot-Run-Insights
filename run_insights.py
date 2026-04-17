@@ -512,8 +512,10 @@ with st.sidebar:
                     st.session_state["w4"] = weights_pref["w4"]
                 if "threshold_str" in prefs:
                     st.session_state["threshold_str"] = prefs["threshold_str"]
-        except Exception:
-            pass  # preferences table may not exist yet; use defaults
+            else:
+                st.warning(f"[DEBUG] Prefs loaded but empty: {prefs!r}")
+        except Exception as _pref_err:
+            st.warning(f"[DEBUG] Prefs load error: {_pref_err}")
 
     _past_meta = st.session_state["past_runs_meta"]
 
@@ -777,8 +779,8 @@ with st.sidebar:
                     user["access_token"], user["id"],
                     {"scoring_weights": _current_weights, "threshold_str": _current_threshold_str},
                 )
-            except Exception:
-                pass  # silent — don't break UX if save fails
+            except Exception as _save_err:
+                st.warning(f"[DEBUG] Prefs save error: {_save_err}")
 
         total_w = w_time + w_diam + w_cv + w_t50
         if total_w == 0:
