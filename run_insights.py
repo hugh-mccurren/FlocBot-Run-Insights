@@ -444,6 +444,7 @@ _add_logout_button()
 import supabase_client as _db  # noqa: E402 (also imported inside sidebar below)
 if "prefs_loaded" not in st.session_state:
     st.session_state["prefs_loaded"] = True
+    _prefs_found = False
     try:
         _prefs = _db.get_preferences(st.session_state["user"]["access_token"])
         if _prefs:
@@ -453,9 +454,11 @@ if "prefs_loaded" not in st.session_state:
                     st.session_state[_key] = _w[_key]
             if "threshold_str" in _prefs:
                 st.session_state["threshold_str"] = _prefs["threshold_str"]
-            st.rerun()
+            _prefs_found = True
     except Exception:
         pass  # table may not exist yet; use defaults
+    if _prefs_found:
+        st.rerun()  # must be outside try/except — rerun works via exception internally
 
 PHASE_COLORS = {
     "rapid_mix": "rgba(239, 68, 68, 0.08)",
