@@ -444,17 +444,11 @@ def _add_logout_button():
 _add_logout_button()
 
 # ─── Load user preferences at top level (before any widgets render) ───────
-import supabase_client as _db  # noqa: E402 (also imported inside sidebar below)
+# Loaded values are stored under _pref_* keys and used as the `value=` default
+# for each widget. Widgets handle fallback defaults via .get(..., default).
+import supabase_client as _db  # noqa: E402
 if "prefs_loaded" not in st.session_state:
     st.session_state["prefs_loaded"] = True
-    # Store loaded prefs under separate keys (_pref_*) so they can be used as
-    # `value=` defaults for widgets. Setting widget keys directly fights with
-    # Streamlit's widget state system.
-    st.session_state["_pref_w1"] = 30
-    st.session_state["_pref_w2"] = 30
-    st.session_state["_pref_w3"] = 20
-    st.session_state["_pref_w4"] = 20
-    st.session_state["_pref_threshold_str"] = "250, 300, 350, 400, 450"
     try:
         _prefs = _db.get_preferences(st.session_state["user"]["access_token"])
         if _prefs:
@@ -513,7 +507,7 @@ with st.sidebar:
     )
 
     # Fetch past runs list (metadata only) — cached in session_state
-    import supabase_client as _db
+    # (_db is imported at top level, above)
     from ui_operator import PlantBaseline, save_baseline_from_kpi, load_baseline
 
     if "past_runs_meta" not in st.session_state:
