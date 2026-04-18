@@ -440,6 +440,23 @@ def _add_logout_button():
 
 _add_logout_button()
 
+# ─── Load user preferences at top level (before any widgets render) ───────
+import supabase_client as _db  # noqa: E402 (also imported inside sidebar below)
+if "prefs_loaded" not in st.session_state:
+    st.session_state["prefs_loaded"] = True
+    try:
+        _prefs = _db.get_preferences(st.session_state["user"]["access_token"])
+        if _prefs:
+            _w = _prefs.get("scoring_weights", {})
+            for _key in ("w1", "w2", "w3", "w4"):
+                if _key in _w:
+                    st.session_state[_key] = _w[_key]
+            if "threshold_str" in _prefs:
+                st.session_state["threshold_str"] = _prefs["threshold_str"]
+            st.rerun()
+    except Exception:
+        pass  # table may not exist yet; use defaults
+
 PHASE_COLORS = {
     "rapid_mix": "rgba(239, 68, 68, 0.08)",
     "flocculation": "rgba(16, 185, 129, 0.08)",
@@ -496,30 +513,6 @@ with st.sidebar:
             )
         except Exception:
             st.session_state["past_runs_meta"] = []
-
-    # Load saved user preferences (scoring weights) once per session
-    if "prefs_loaded" not in st.session_state:
-        st.session_state["prefs_loaded"] = True
-        _needs_rerun = False
-        try:
-            prefs = _db.get_preferences(st.session_state["user"]["access_token"])
-            if prefs:
-                weights_pref = prefs.get("scoring_weights", {})
-                if "w1" in weights_pref:
-                    st.session_state["w1"] = weights_pref["w1"]
-                if "w2" in weights_pref:
-                    st.session_state["w2"] = weights_pref["w2"]
-                if "w3" in weights_pref:
-                    st.session_state["w3"] = weights_pref["w3"]
-                if "w4" in weights_pref:
-                    st.session_state["w4"] = weights_pref["w4"]
-                if "threshold_str" in prefs:
-                    st.session_state["threshold_str"] = prefs["threshold_str"]
-                _needs_rerun = True
-        except Exception:
-            pass  # preferences table may not exist yet; use defaults
-        if _needs_rerun:
-            st.rerun()
 
     _past_meta = st.session_state["past_runs_meta"]
 
