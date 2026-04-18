@@ -434,7 +434,10 @@ def _add_logout_button():
             except Exception:
                 pass
             for _k in ["user", "prefs_loaded", "_saved_prefs_snapshot",
-                       "past_runs_meta", "loaded_runs_cache", "selected_run_ids"]:
+                       "past_runs_meta", "loaded_runs_cache", "selected_run_ids",
+                       "w1", "w2", "w3", "w4", "threshold_str",
+                       "_pref_w1", "_pref_w2", "_pref_w3", "_pref_w4",
+                       "_pref_threshold_str"]:
                 st.session_state.pop(_k, None)
             st.rerun()
 
@@ -444,21 +447,25 @@ _add_logout_button()
 import supabase_client as _db  # noqa: E402 (also imported inside sidebar below)
 if "prefs_loaded" not in st.session_state:
     st.session_state["prefs_loaded"] = True
-    _prefs_found = False
+    # Store loaded prefs under separate keys (_pref_*) so they can be used as
+    # `value=` defaults for widgets. Setting widget keys directly fights with
+    # Streamlit's widget state system.
+    st.session_state["_pref_w1"] = 30
+    st.session_state["_pref_w2"] = 30
+    st.session_state["_pref_w3"] = 20
+    st.session_state["_pref_w4"] = 20
+    st.session_state["_pref_threshold_str"] = "250, 300, 350, 400, 450"
     try:
         _prefs = _db.get_preferences(st.session_state["user"]["access_token"])
         if _prefs:
             _w = _prefs.get("scoring_weights", {})
-            for _key in ("w1", "w2", "w3", "w4"):
-                if _key in _w:
-                    st.session_state[_key] = _w[_key]
+            for _k in ("w1", "w2", "w3", "w4"):
+                if _k in _w:
+                    st.session_state[f"_pref_{_k}"] = _w[_k]
             if "threshold_str" in _prefs:
-                st.session_state["threshold_str"] = _prefs["threshold_str"]
-            _prefs_found = True
+                st.session_state["_pref_threshold_str"] = _prefs["threshold_str"]
     except Exception:
         pass  # table may not exist yet; use defaults
-    if _prefs_found:
-        st.rerun()  # must be outside try/except — rerun works via exception internally
 
 PHASE_COLORS = {
     "rapid_mix": "rgba(239, 68, 68, 0.08)",
@@ -730,7 +737,7 @@ with st.sidebar:
         default_thresholds = "250, 300, 350, 400, 450"
         threshold_str = st.text_input(
             "Thresholds (μm)",
-            default_thresholds,
+            st.session_state.get("_pref_threshold_str", default_thresholds),
             key="threshold_str",
             help="Comma-separated diameter values for time-to-threshold metrics.",
         )
@@ -752,10 +759,14 @@ with st.sidebar:
         # ── Scoring weights (collapsed) ──
         with st.expander("Scoring Weights", expanded=False):
             st.caption("Adjust relative importance of each metric.")
-            w_time = st.slider("Time to threshold", 0, 100, 30, key="w1")
-            w_diam = st.slider("Pre-settle diameter", 0, 100, 30, key="w2")
-            w_cv = st.slider("Signal noise", 0, 100, 20, key="w3")
-            w_t50 = st.slider("Settling t50", 0, 100, 20, key="w4")
+            w_time = st.slider("Time to threshold", 0, 100,
+                               st.session_state.get("_pref_w1", 30), key="w1")
+            w_diam = st.slider("Pre-settle diameter", 0, 100,
+                               st.session_state.get("_pref_w2", 30), key="w2")
+            w_cv = st.slider("Signal noise", 0, 100,
+                             st.session_state.get("_pref_w3", 20), key="w3")
+            w_t50 = st.slider("Settling t50", 0, 100,
+                              st.session_state.get("_pref_w4", 20), key="w4")
 
             score_threshold = 300.0
             score_thr_options = [t for t in thresholds if t > 0]
