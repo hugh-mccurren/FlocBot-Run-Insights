@@ -5,3 +5,5 @@ __pycache__/
 .env
 nul
 flocbot_run_insights_source.txt
+.claude/
+.pytest_cache/

@@ -14,11 +14,12 @@ Creates synthetic Excel workbooks in memory and verifies that parse_file:
 import io
 import sys
 import traceback
+from pathlib import Path
 import pandas as pd
 import numpy as np
 
-# Ensure project root is importable
-sys.path.insert(0, ".")
+# Ensure project root is importable regardless of where the test is invoked from
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flocbot_parser import parse_file, RunMetadata
 
